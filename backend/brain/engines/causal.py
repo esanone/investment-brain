@@ -150,7 +150,7 @@ def score(record: dict) -> dict:
     low, high = _sigmoid(_logit(prior) + 0.5 * total_ll), _sigmoid(_logit(prior) + 1.5 * total_ll)
     spread = 0.06 + 0.10 / math.sqrt(max(len(active), 1))       # thinner evidence -> wider band
     low, high = min(low, high) - spread, max(low, high) + spread
-    evidence_strength = min(100, r((sup_w + con_w) * 40, 0))
+    evidence_strength = r(100 * math.tanh((sup_w + con_w) / 3.0), 0)     # soft scale: ~3 units of weighted |ln LR| -> 76
     evidence_quality = r(sum(qualities) / len(qualities) * 100, 0) if qualities else None
     con_share = con_w / (sup_w + con_w) if (sup_w + con_w) else 0
     contradictory = "Low" if con_share < 0.2 else "Moderate" if con_share < 0.4 else "High"

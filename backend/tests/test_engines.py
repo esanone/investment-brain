@@ -120,3 +120,23 @@ def test_attention_series_stats_detects_acceleration_from_low_base():
     assert a["score"] < 60 and abs(a["vs_28d_pct"]) < 10
     assert b["score"] > 85 and b["vs_28d_pct"] > 80 and b["z"] > 2
     assert series_stats(pd.Series([1.0, 2.0])) is None            # too short
+
+
+def test_causal_posterior_is_computed_from_reference_class_and_evidence():
+    from brain.engines import causal
+    sims = {k: 0.8 for k in causal.SIM_DIMS}
+    rec = {"analogues": [{"similarity": sims, "pattern_occurred": i < 8} for i in range(10)],
+           "evidence": [{"direction": "supports", "strength": "strong", "quality": 0.9, "independence": 0.9},
+                        {"direction": "contradicts", "strength": "strong", "quality": 0.9, "independence": 0.9}],
+           "scenarios": {"bull": {"weight": 1}, "base": {"weight": 2}, "bear": {"weight": 1}}}
+    causal.score(rec)
+    p = rec["probability"]
+    assert p["prior"] == 75.0                                  # (8+1)/(10+2)
+    assert abs(p["posterior"] - p["prior"]) < 0.2              # equal and opposite evidence cancels in log-odds
+    assert p["range_low"] < p["posterior"] < p["range_high"]
+    assert rec["scenarios"]["base"]["probability"] == 50.0
+    rec["evidence"][1]["retired"] = True
+    causal.score(rec)
+    assert rec["probability"]["posterior"] > 75.0             # retiring the contradiction moves it up
+    resolved = causal.resolve(dict(rec), True)
+    assert 0 <= resolved["brier"]["final"] <= 1 and resolved["status"] == "resolved"

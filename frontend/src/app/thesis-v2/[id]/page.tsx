@@ -119,6 +119,8 @@ export default async function ThesisV2Page({ params }: { params: Promise<{ id: s
   const activeEvidence = (t.evidence ?? []).filter((e) => !e.retired).length;
   const history = t.probability_history ?? [];
   const updates = [...(t.updates ?? [])].reverse();
+  const sourceBullets = (t.source_bullets ?? []).filter((b) => b && b.text);
+  const sourceDates = new Set(sourceBullets.map((b) => date(b.date)));
 
   return (
     <>
@@ -128,6 +130,11 @@ export default async function ThesisV2Page({ params }: { params: Promise<{ id: s
             <span>{t.title}</span>
             <ThesisStatusChip status={t.status} outcome={t.outcome} />
             <ConfidenceChip value={p?.confidence} />
+            {t.origin === "briefs" && (
+              <span className="chip" title="Consolidated from the morning briefs' long-term human-behaviour bullets (see Source observations)">
+                origin: briefs
+              </span>
+            )}
           </span>
         }
         subtitle={f?.statement}
@@ -251,6 +258,23 @@ export default async function ThesisV2Page({ params }: { params: Promise<{ id: s
             </div>
           </div>
         </Section>
+
+        {sourceBullets.length > 0 && (
+          <Section
+            title="Source observations"
+            subtitle={`${sourceBullets.length} long-term human-behaviour bullet${sourceBullets.length === 1 ? "" : "s"} from ${sourceDates.size} morning brief${sourceDates.size === 1 ? "" : "s"} · the observations this thesis consolidates`}
+            className="lg:col-span-2"
+          >
+            <ul className="flex flex-col gap-1.5 text-[13px]">
+              {sourceBullets.map((b, i) => (
+                <li key={`${b.date}-${i}`} className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-x-3">
+                  <span className="mono text-subtle">{date(b.date)}</span>
+                  <span className="leading-relaxed">{b.text}</span>
+                </li>
+              ))}
+            </ul>
+          </Section>
+        )}
 
         <Section title="Causal mechanism" subtitle="Why humans would do this · the nine parts the analogues are matched on" className="lg:col-span-2">
           <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">

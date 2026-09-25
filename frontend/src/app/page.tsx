@@ -12,13 +12,21 @@ import { REGIME_COLORS } from "@/components/ProbabilityChart";
 import { RunButton } from "@/components/RunButton";
 import { ScoreBadge } from "@/components/ScoreBadge";
 import { Section } from "@/components/Section";
+import { ReadinessChip, ThesisRefChip } from "@/components/ThesisV2Chips";
 
 export * from "@/lib/segment-config";
 
 const TREND_GLYPH: Record<string, string> = { accelerating: "▲", steady: "→", decelerating: "▼" };
 
 export default async function DashboardPage() {
-  const [ov, health, briefRes, attRes, thesisRes] = await Promise.all([api.overview(), api.health(), api.brief(), api.attention(), api.thesis()]);
+  const [ov, health, briefRes, attRes, thesisRes, oppRes] = await Promise.all([
+    api.overview(),
+    api.health(),
+    api.brief(),
+    api.attention(),
+    api.thesis(),
+    api.thesisV2Opportunities(),
+  ]);
   const running = health.ok ? health.data.running : false;
   // Morning brief card is optional: nothing renders until a brief has been generated.
   const brief = briefRes.ok ? briefRes.data : null;
@@ -32,6 +40,14 @@ export default async function DashboardPage() {
   const thesis = thesisRes.ok && thesisRes.data.thesis ? thesisRes.data : null;
   const thesisText = thesis?.thesis ?? "";
   const thesisTop = [...(thesis?.theme_ranking ?? [])].sort((a, b) => (b.conviction ?? 0) - (a.conviction ?? 0)).slice(0, 3);
+  // Thesis v2 picks card is optional: nothing renders until the opportunity ranking has been built.
+  const opps = oppRes.ok ? oppRes.data : null;
+  const oppCandidates = opps?.candidates ?? [];
+  const oppPicks = oppCandidates
+    .filter((c) => c.buy_readiness === "ready")
+    .sort((a, b) => (b.score ?? -Infinity) - (a.score ?? -Infinity))
+    .slice(0, 5);
+  const oppWatch = oppCandidates.filter((c) => c.buy_readiness === "watch").length;
 
   if (!ov.ok) {
     return (
@@ -150,6 +166,47 @@ export default async function DashboardPage() {
             </div>
             <div className="mt-2 text-[12px]">
               <Link href="/attention" className="text-accent hover:underline">Open the attention page</Link>
+            </div>
+          </Section>
+        )}
+
+        {/* THESIS V2 PICKS */}
+        {opps && (
+          <Section
+            title="Thesis v2 picks"
+            subtitle={
+              <Link href="/thesis-v2" className="hover:text-accent">
+                Stocks positioned for the open theses · {opps.n_theses} open thes{opps.n_theses === 1 ? "is" : "es"} · as of {opps.as_of}
+              </Link>
+            }
+            className="lg:col-span-5"
+          >
+            {oppPicks.length ? (
+              <ul className="flex flex-col gap-1 text-[12.5px]">
+                {oppPicks.map((c) => (
+                  <li key={c.ticker} className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <Link href={`/companies/${c.ticker}`} className="min-w-0 flex-1 truncate hover:text-accent">
+                      <span className="mono font-medium">{c.ticker}</span> <span className="text-muted">{c.name}</span>
+                    </Link>
+                    <span className="flex flex-wrap gap-1">
+                      {c.theses.slice(0, 3).map((x) => (
+                        <ThesisRefChip key={x.thesis_id} id={x.thesis_id} contribution={x.contribution} />
+                      ))}
+                    </span>
+                    <span className="w-12 text-right font-medium" title="Rank score">
+                      {num(c.score, 2)}
+                    </span>
+                    <ReadinessChip value={c.buy_readiness} />
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="text-[12.5px] text-muted">
+                No candidate passes the entry gate today — {oppWatch} on watch of {oppCandidates.length} ranked.
+              </div>
+            )}
+            <div className="mt-2 text-[12px]">
+              <Link href="/thesis-v2" className="text-accent hover:underline">Open the full ranking</Link>
             </div>
           </Section>
         )}

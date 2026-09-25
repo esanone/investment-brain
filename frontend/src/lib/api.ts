@@ -22,6 +22,7 @@ import type {
   ThesisHistoryRow,
   ThesisV2,
   ThesisV2List,
+  ThesisV2Opportunities,
 } from "./types";
 import { IS_STATIC, staticFileFor } from "./static";
 
@@ -154,6 +155,13 @@ export const api = {
   thesisV2List: () => get<ThesisV2List>("/api/thesis-v2"),
   /** One Thesis v2 record. 404s with "No thesis {id}" until it has been analysed. */
   thesisV2: (id: string) => get<ThesisV2>(`/api/thesis-v2/${encodeURIComponent(id.toUpperCase())}`),
+  /** Stocks ranked by exposure to the open theses' value pools. 404s with "No opportunity ranking yet" until the from-briefs job has run. */
+  thesisV2Opportunities: () => get<ThesisV2Opportunities>("/api/thesis-v2/opportunities"),
+  /**
+   * Consolidate the briefs' long-term human-behaviour bullets into theses, analyse each new one and re-rank stocks,
+   * all in the background (15-25 min); poll /api/health `running_thesis_v2` until false.
+   */
+  analyzeBriefsThesisV2: () => post<{ started: boolean; reason?: string }>("/api/thesis-v2/analyze-briefs"),
   /** Analyse a new thesis statement in the background (3-5 min); poll /api/health `running_thesis_v2` until false. 422 = statement too short. */
   createThesisV2: (statement: string) =>
     post<{ started: boolean; reason?: string }>("/api/thesis-v2", {

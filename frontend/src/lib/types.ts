@@ -1394,4 +1394,97 @@ export interface ThesisV2 {
   last_update: string | null;
   /** ISO date the thesis was resolved (only when `status` is "resolved"). */
   resolved?: string;
+  /**
+   * Long-term human-behaviour bullets from the morning briefs that this thesis
+   * consolidates (pipeline `run_thesis_v2_from_briefs`). Absent on hand-written theses
+   * that no consolidation has merged into.
+   */
+  source_bullets?: ThesisV2SourceBullet[];
+  /** "briefs" when the statement was consolidated from the briefs' bullets; absent for hand-written statements. */
+  origin?: ThesisV2Origin | string;
+}
+
+/** One morning-brief bullet (`llm.human_behavior.long_term`) with the brief's as-of date. */
+export interface ThesisV2SourceBullet {
+  date: string;
+  text: string;
+}
+
+export type ThesisV2Origin = "briefs";
+
+// ---------------------------------------------------------------- thesis v2 opportunities
+/**
+ * Payload of /api/thesis-v2/opportunities (causal.py `opportunities()` +
+ * `opportunity_memo()`): universe stocks ranked by posterior-weighted exposure to
+ * the open theses' value pools, filtered by the book's entry discipline.
+ * 404 "No opportunity ranking yet" until the from-briefs job has run.
+ */
+export type ThesisV2BuyReadiness = "ready" | "watch" | "not yet";
+
+export interface ThesisV2CandidateThesis {
+  thesis_id: string;
+  /** Posterior × value-pool weight summed over the thesis's pools naming this ticker; negative for abundant / new-risk / loses-pricing-power pools. */
+  contribution: Num;
+}
+
+export interface ThesisV2CandidateRole {
+  thesis_id: string;
+  layer: string;
+  becomes: ValuePoolBecomes | string;
+  /** The thesis's posterior, percent points. */
+  posterior: Num;
+}
+
+export interface ThesisV2Candidate {
+  ticker: string;
+  name: string | null;
+  sector: string | null;
+  /** Sum of the positive thesis contributions (≥ 0). */
+  thesis_exposure: Num;
+  /** Sum of the negative thesis contributions (≤ 0). */
+  headwind: Num;
+  /** Final rank score: exposure × opportunity × gap × technical readiness × attention factor. */
+  score: Num;
+  theses: ThesisV2CandidateThesis[];
+  /** First six value-pool roles, in ledger order. */
+  roles: ThesisV2CandidateRole[];
+  opportunity: Num;
+  expectations_gap: Num;
+  pricing: Num;
+  reality: Num;
+  narrative: Num;
+  technical_score: Num;
+  technical_stage: string | null;
+  technical_ready: boolean;
+  attention: Num;
+  attention_not_priced: boolean;
+  crowded: boolean;
+  buy_readiness: ThesisV2BuyReadiness | string;
+}
+
+export interface ThesisV2MemoPick {
+  ticker: string;
+  why: string;
+  entry_condition: string;
+  key_risk: string;
+}
+
+export interface ThesisV2Memo {
+  picks: ThesisV2MemoPick[];
+  portfolio_note: string;
+}
+
+export interface ThesisV2Opportunities {
+  as_of: string;
+  generated_at: string;
+  /** Open theses that contributed to the ranking. */
+  n_theses: number;
+  /** Top 40 by score, descending. */
+  candidates: ThesisV2Candidate[];
+  /** Names with headwind < -0.3, most negative first (max 12). */
+  losers: ThesisV2Candidate[];
+  /** Plain-text description of the scoring formula. */
+  method: string;
+  /** LLM rationale for the top candidates; absent when the LLM is off or the call failed. */
+  memo?: ThesisV2Memo | null;
 }

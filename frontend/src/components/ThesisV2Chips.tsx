@@ -1,5 +1,6 @@
-import type { EvidenceDirection, ThesisV2Confidence, ThesisV2Contradictory, ThesisV2Status } from "@/lib/types";
-import { BECOMES_LABELS, EPISTEMIC_LABELS } from "@/lib/format";
+import Link from "next/link";
+import type { EvidenceDirection, Num, ThesisV2BuyReadiness, ThesisV2Confidence, ThesisV2Contradictory, ThesisV2Status } from "@/lib/types";
+import { BECOMES_LABELS, EPISTEMIC_LABELS, num, signed } from "@/lib/format";
 
 /** Small chip set for the Thesis v2 pages. Green/red only where the value is a signed judgement. */
 
@@ -79,4 +80,45 @@ const BECOMES_CLASS: Record<string, string> = {
 export function BecomesChip({ value }: { value: string | null | undefined }) {
   if (!value) return <span className="chip">—</span>;
   return <span className={`chip ${BECOMES_CLASS[value] ?? ""}`}>{BECOMES_LABELS[value] ?? value.replace(/_/g, " ")}</span>;
+}
+
+/** Tooltip-only labels; the chip itself stays short. */
+function becomesLabel(value: string): string {
+  return BECOMES_LABELS[value] ?? value.replace(/_/g, " ");
+}
+
+/**
+ * `layer · becomes` role of a ticker in one thesis's value pool (opportunities
+ * ranking). Tinted like BecomesChip; the thesis id and its posterior go in the tooltip.
+ */
+export function RoleChip({ layer, becomes, thesisId, posterior }: { layer: string; becomes: string; thesisId?: string; posterior?: Num }) {
+  const title = [thesisId, posterior !== undefined ? `posterior ${num(posterior, 0)}%` : null, `${layer} · ${becomesLabel(becomes)}`].filter(Boolean).join(" · ");
+  return (
+    <span className={`chip max-w-64 truncate align-bottom ${BECOMES_CLASS[becomes] ?? ""}`} title={title}>
+      <span className="text-ink">{layer}</span> · {becomesLabel(becomes)}
+    </span>
+  );
+}
+
+/** `T-00x` link to a thesis record; a negative contribution (headwind) turns the chip red. */
+export function ThesisRefChip({ id, contribution }: { id: string; contribution?: Num }) {
+  const neg = contribution !== null && contribution !== undefined && contribution < 0;
+  const title = contribution === undefined ? id : `${id} · contribution ${signed(contribution, 2)} (posterior × value-pool weight)`;
+  return (
+    <Link href={`/thesis-v2/${id}`} className={`chip mono hover:text-accent ${neg ? "border-neg bg-neg-soft text-neg" : ""}`} title={title}>
+      {id}
+    </Link>
+  );
+}
+
+/** ready = passes the entry gate today (green) · watch = neutral · not yet = dimmed. */
+const READINESS_CLASS: Record<ThesisV2BuyReadiness, string> = {
+  ready: "border-pos bg-pos-soft text-pos font-medium",
+  watch: "",
+  "not yet": "border-dashed text-subtle",
+};
+
+export function ReadinessChip({ value }: { value: ThesisV2BuyReadiness | string | null | undefined }) {
+  if (!value) return <span className="chip">—</span>;
+  return <span className={`chip whitespace-nowrap ${READINESS_CLASS[value as ThesisV2BuyReadiness] ?? ""}`}>{value}</span>;
 }

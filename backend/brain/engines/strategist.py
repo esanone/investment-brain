@@ -182,9 +182,11 @@ def compute(company: dict, analysis: dict, scores: dict, exposures: list[dict], 
         breaks.append("Price closes >10% below its 200-day average with negative relative strength")
         rules.append({"id": "trend", "label": "Distance from 200dma", "metric": "dist_200dma", "op": "<", "threshold": -10, "and_negative_rs": True, "current": M.get("dist_200dma")})
     if exposures:
-        breaks.append(f"{exposures[0]['theme']} theme trend drops below 45")
-        rules.append({"id": "theme", "label": f"{exposures[0]['theme']} theme trend", "metric": "theme_trend", "theme_id": exposures[0]["theme_id"], "op": "<", "threshold": 45,
-                      "current": themes_by_id.get(exposures[0]["theme_id"], {}).get("trend")})
+        t_now = themes_by_id.get(exposures[0]["theme_id"], {}).get("trend")
+        t_thr = min(45, round(t_now - 10)) if t_now is not None else 45     # relative to entry: a weak theme must weaken a further 10 pts
+        breaks.append(f"{exposures[0]['theme']} theme trend drops below {t_thr} (currently {t_now})")
+        rules.append({"id": "theme", "label": f"{exposures[0]['theme']} theme trend", "metric": "theme_trend", "theme_id": exposures[0]["theme_id"], "op": "<", "threshold": t_thr,
+                      "current": t_now})
 
     thesis = (f"{company['name']} ({t}) screens at opportunity {r(opportunity, 0)} with an expectations gap of {r(gap, 0)}. "
               f"Reality {r(reality, 0)} reflects {_pct(rg)} TTM revenue growth, {_pct(L.get('operating_margin'))} operating margin and {_pct(L.get('roic'))} ROIC; "

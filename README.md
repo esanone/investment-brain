@@ -177,3 +177,23 @@ Turtle rules, Kaminski & Lo, Han-Zhou-Zhu, Thorp, Marks); the research brief wit
 | How much | Equal risk: 1% of the book per position ÷ distance to the stop, scaled by conviction; 5% cap at initiation, 8% max, 25% per sector, 35% per theme; the Risk engine's equity posture is a cap and cash absorbs what does not qualify | Turtles / Hite; 1940-Act style caps; Marks on cash |
 | When to sell | Frozen thesis-break rules; initial stop = max(2 × ATR20, 8%) capped at 12%; Chandelier trail (highest close − 3 × ATR, never lowered); Stage-4 exit when price closes below a declining 30-week average; trend template failing two runs running; 26-week time stop if under water and below the 200-day; two consecutive brief trim/review calls halve, three exit; sell ⅓ into strength at +35% with RSI ≥ 75 | O'Neil, Minervini, LeBeau, Weinstein, Han-Zhou-Zhu |
 | Book-level | NAV index tracked per run; Turtle ladder: −10% drawdown → risk per position ×0.5 and equity cap ×0.8, −20% → ×0.25 and ×0.64; after 3+ stop-outs in one run, new entries half-sized | Original Turtle rules; Tudor Jones |
+
+## Monthly cadence (tax-aware)
+
+The portfolio trades only at the first run of each calendar month. Every other morning run *monitors*: it marks the
+book to market, re-evaluates every frozen rule and stop, and records **alerts** (what would trade at the next
+recalibration) without trading. The only intra-month exit is the 12% hard loss cap. Trims into strength wait until a
+position has been held 365 days (long-term capital-gains treatment) unless a rule fires. Holdings show days held and
+long-term eligibility.
+
+## Thesis v2 — Causal Futures Engine
+
+A probabilistic thesis ledger (`backend/brain/engines/causal.py`): formalize a thesis measurably → decompose the
+causal mechanism → retrieve 10–20 historical analogues by mechanism (scored on eight similarity dimensions) → the
+reference class gives the prior (Laplace-smoothed base rate over analogues with similarity ≥ 40) → present evidence
+enters as likelihood ratios (strong 3×, moderate 2×, weak 1.3×; contradicting evidence inverts) weighted by quality ×
+independence → **posterior log-odds = prior log-odds + Σ wᵢ ln LRᵢ**, computed in code, never stated by the model →
+adoption stage, scenarios, indicators, value pools and mapped companies. Every thesis is a ledger entry with a
+probability history; the monthly review asks only "what changed?"; resolved theses are Brier-scored and binned for
+calibration. `python -m brain.pipeline thesis-v2 --seed | --new "..." | --update all | --resolve T-001:true`.
+The original `/thesis` page (Human Future engine) is unchanged; the ledger lives at `/thesis-v2`.

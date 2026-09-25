@@ -67,7 +67,8 @@ def health() -> dict:
     with session_scope() as s:
         rid = _latest_run_id(s)
     return {"ok": True, "latest_run": rid, "running": _run_state["running"], "running_brief": _run_state["running_brief"],
-            "running_attention": _run_state.get("running_attention", False), "last_error": _run_state["last_error"]}
+            "running_attention": _run_state.get("running_attention", False), "running_thesis_v2": _run_state.get("running_thesis_v2", False),
+            "last_error": _run_state["last_error"]}
 
 
 @app.get("/api/runs")
@@ -251,6 +252,82 @@ def thesis_history() -> list[dict]:
         rows = s.execute(select(Snapshot).where(Snapshot.kind == "longterm").order_by(desc(Snapshot.id)).limit(30)).scalars()
         return [{"id": x.run_id, "as_of": x.as_of.isoformat(), "n_briefs": x.payload.get("n_briefs"), "confidence": x.payload.get("confidence"),
                  "top_themes": [(t["theme"], t["conviction"]) for t in x.payload.get("theme_ranking", [])[:5]], "llm": x.payload.get("llm_provider")} for x in rows]
+
+
+# ---------------------------------------------------------------- Thesis v2 (Causal Futures Engine)
+from pydantic import BaseModel as _BM
+
+
+class ThesisIn(_BM):
+    statement: str
+
+
+class ResolveIn(_BM):
+    outcome: bool
+
+
+@app.get("/api/thesis-v2")
+def thesis_v2_list() -> dict:
+    from .engines.causal import scoreboard, summary
+    from .pipeline import _thesis_v2_records
+    recs = list(_thesis_v2_records().values())
+    recs.sort(key=lambda x: x["id"])
+    return {"theses": [summary(x) for x in recs], "scoreboard": scoreboard(recs)}
+
+
+@app.get("/api/thesis-v2/{thesis_id}")
+def thesis_v2_get(thesis_id: str) -> dict:
+    from .pipeline import _thesis_v2_records
+    rec = _thesis_v2_records().get(thesis_id.upper())
+    if not rec:
+        raise HTTPException(404, f"No thesis {thesis_id}. Create one with POST /api/thesis-v2 or: python -m brain.pipeline thesis-v2 --seed")
+    return rec
+
+
+def _bg(flag: str, fn, *args) -> dict:
+    if _run_state.get(flag):
+        return {"started": False, "reason": "already running"}
+
+    def _job():
+        _run_state[flag], _run_state["last_error"] = True, None
+        try:
+            fn(*args)
+        except Exception as e:
+            _run_state["last_error"] = str(e)
+        finally:
+            _run_state[flag] = False
+    return {"job": _job}
+
+
+@app.post("/api/thesis-v2")
+def thesis_v2_create(body: ThesisIn, background: BackgroundTasks) -> dict:
+    from .pipeline import run_thesis_v2_new
+    if len(body.statement.strip()) < 20:
+        raise HTTPException(422, "Give the thesis as a full sentence (population, behaviour, horizon).")
+    j = _bg("running_thesis_v2", run_thesis_v2_new, body.statement.strip())
+    if "job" not in j:
+        return j
+    background.add_task(j["job"])
+    return {"started": True}
+
+
+@app.post("/api/thesis-v2/{thesis_id}/update")
+def thesis_v2_update(thesis_id: str, background: BackgroundTasks) -> dict:
+    from .pipeline import run_thesis_v2_update
+    j = _bg("running_thesis_v2", run_thesis_v2_update, thesis_id.upper(), True)
+    if "job" not in j:
+        return j
+    background.add_task(j["job"])
+    return {"started": True}
+
+
+@app.post("/api/thesis-v2/{thesis_id}/resolve")
+def thesis_v2_resolve(thesis_id: str, body: ResolveIn) -> dict:
+    from .pipeline import run_thesis_v2_resolve
+    try:
+        return run_thesis_v2_resolve(thesis_id.upper(), body.outcome)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
 
 
 @app.get("/api/attention")

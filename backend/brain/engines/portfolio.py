@@ -40,7 +40,11 @@ RULES = {
     "brief_trim_consecutive": 2, "brief_exit_consecutive": 3,
     "earnings_blackout_days": 5, "cooldown_stopouts": 3,
     "rotation_break_threshold": -30, "rotation_break_days": 12,
-    "rotation_entry_min": -30,       # no new entries into a sector whose rotation score is below this   # sector rotation must stay below -30 for two consecutive weeks of readings
+    "rotation_entry_min": -30,       # no new entries into a sector whose rotation score is below this
+    # Cadence: trades only at the monthly recalibration (first run of each calendar month); daily runs monitor.
+    # Between recalibrations only the hard loss cap can force an exit. Trims into strength wait for long-term
+    # capital-gains treatment (>= 365 days held) unless a rule fires.
+    "recalibration_cadence": "monthly", "intra_month_exits": "hard_stop", "long_term_holding_days": 365,   # sector rotation must stay below -30 for two consecutive weeks of readings
     "incumbency_bonus": 1.10, "attention_not_priced_bonus": 1.15, "crowded_penalty": 0.75,
 }
 SLEEVE_PROXIES = {
@@ -90,6 +94,96 @@ def evaluate_rule(rule: dict, ctx: dict) -> dict:
         else:
             hit = cur > rule["threshold"]
     return {**rule, "current": r(cur, 4) if isinstance(cur, float) else cur, "triggered": bool(hit)}
+
+
+def _next_recalibration(today: date) -> str:
+    y, m = (today.year + 1, 1) if today.month == 12 else (today.year, today.month + 1)
+    return date(y, m, 1).isoformat()
+
+
+def _monitor(prior: dict, strategies: dict, analyses: dict, companies: dict, risk: dict, flows: dict, regime: dict,
+             themes_by_id: dict, technicals: dict, briefs: list, rotation_history: Optional[dict], portfolio_value: float,
+             today: date, prior_flows: Optional[dict], last_recal: date) -> dict:
+    """Between monthly recalibrations: carry the book, mark to market, re-evaluate every rule and stop, and record
+    ALERTS (what would trade at the next recalibration). Only the hard loss cap forces an exit now."""
+    probs = regime.get("regime", {}).get("probabilities", {})
+    adverse = (probs.get("Stagflation") or 0) + (probs.get("Contraction") or 0)
+    rot = flows.get("sector_rotation", {})
+    rot_prev = (prior_flows or {}).get("sector_rotation", {}) if prior_flows else {}
+    theme_trends = {k: v.get("trend") for k, v in themes_by_id.items()}
+    bench_3m = flows.get("benchmark", {}).get("return_3m") or 0
+    holdings, trades, alerts, exits = [], [], [], []
+    for h in prior.get("holdings", []):
+        t = h["ticker"]
+        a = analyses.get(t)
+        price = float(a["price"]) if a and a.get("price") else float(h.get("price") or 0)
+        entry = float(h.get("entry_price") or price)
+        trail_high = max(float(h.get("trail_high") or entry), price)
+        gain = (price / entry - 1) * 100 if entry else 0.0
+        ta = (technicals or {}).get(t) or {}
+        stops = _stop_levels(entry, ta.get("atr20"), price, trail_high, gain) if price else h.get("stops")
+        pending = []
+        rule_status = h.get("rule_status")
+        if a:
+            ctx = {"latest": a["latest"], "momentum": a["momentum"], "sector_rotation": rot.get(companies.get(t, {}).get("sector")),
+                   "sector_rotation_prev": rot_prev.get(companies.get(t, {}).get("sector")), "adverse_regime_prob": adverse, "as_of": today,
+                   "sector_rotation_history": (rotation_history or {}).get(companies.get(t, {}).get("sector"), []),
+                   "theme_trends": theme_trends, "rs_3m": (a["momentum"].get("return_3m") or 0) - bench_3m}
+            rule_status = [evaluate_rule(r, ctx) for r in h.get("entry_rules", [])]
+            for e in rule_status:
+                if e["triggered"]:
+                    pending.append(f"Thesis break: {e['label']} {e['op']} {e['threshold']} (now {e['current']})")
+        if stops and price and price <= stops["active_stop"]:
+            pending.append(f"Below {'trailing' if stops.get('trailing_stop') and stops['active_stop'] == stops['trailing_stop'] else 'initial'} stop {stops['active_stop']:.2f}")
+        n_flags, flag_notes = _brief_flags(briefs or [], t)
+        if n_flags >= RULES["brief_exit_consecutive"]:
+            pending.append(f"Briefs flagged trim/review {n_flags} days running")
+        hard_hit = bool(stops and price and price <= stops["hard_stop"])
+        row = {**h, "price": price, "pnl_pct": r(gain, 1), "trail_high": r(trail_high, 2), "stops": stops, "rule_status": rule_status,
+               "brief_flags": n_flags, "brief_notes": flag_notes, "status": "held", "prior_weight": h["weight"],
+               "held_days": (today - date.fromisoformat(h["entered"])).days if h.get("entered") else None,
+               "long_term_gain_eligible": bool(h.get("entered") and (today - date.fromisoformat(h["entered"])).days >= RULES["long_term_holding_days"]),
+               "pending_actions": pending, "dollars": r(h["weight"] * portfolio_value, 0)}
+        if hard_hit:
+            exits.append({"ticker": t, "name": h.get("name"), "prior_weight": h["weight"], "entry_price": r(entry, 2), "exit_price": r(price, 2), "pnl_pct": r(gain, 1),
+                          "reason": f"Hard loss cap: {price:.2f} is {gain:+.1f}% vs entry, below {stops['hard_stop']:.2f} (intra-month exit)"})
+            trades.append({"action": "SELL", "ticker": t, "name": h.get("name"), "from": h["weight"], "to": 0.0, "reason": exits[-1]["reason"],
+                           "dollars": r(-h["weight"] * portfolio_value, 0)})
+            continue
+        if pending:
+            alerts.append({"ticker": t, "name": h.get("name"), "weight": h["weight"], "pnl_pct": r(gain, 1), "actions": pending,
+                           "long_term_gain_eligible": row["long_term_gain_eligible"]})
+        holdings.append(row)
+    freed = sum(e["prior_weight"] for e in exits)
+    sleeves = [dict(x) for x in prior.get("sleeves", [])]
+    if freed > 0:
+        cash = next((x for x in sleeves if x["symbol"] == "CASH"), None)
+        if cash:
+            cash["weight"] = r(cash["weight"] + freed, 4)
+        else:
+            sleeves.append({"symbol": "CASH", "name": "Cash / T-bills (SHY proxy)", "sleeve": "Cash", "weight": r(freed, 4)})
+    prior_nav, prior_peak = float(prior.get("nav_index") or 1.0), float(prior.get("nav_peak") or 1.0)
+    pairs = [(float(analyses[h["ticker"]]["price"]) / float(h["price"]) - 1, h["weight"]) for h in prior.get("holdings", [])
+             if analyses.get(h["ticker"]) and analyses[h["ticker"]].get("price") and h.get("price")]
+    period_ret = sum(rt * w for rt, w in pairs) if pairs else 0.0
+    nav_index = prior_nav * (1 + period_ret)
+    nav_peak = max(prior_peak, nav_index)
+    out = {**prior, "as_of": today.isoformat(), "portfolio_value": portfolio_value, "rules": RULES,
+           "cadence": {"mode": "monitor", "last_recalibration": last_recal.isoformat(), "next_recalibration": _next_recalibration(today),
+                       "note": "Monthly cadence: positions trade only at the first run of each month (capital-gains awareness); "
+                               "between runs the book is marked to market and rules are evaluated into alerts. Only the 12% hard loss cap exits intra-month."},
+           "last_recalibration": last_recal.isoformat(),
+           "holdings": holdings, "sleeves": sleeves, "trades": trades, "exits": exits, "alerts": alerts,
+           "equity_weight": r(sum(h["weight"] for h in holdings), 4), "cash_weight": r(sum(x["weight"] for x in sleeves if x["sleeve"] == "Cash"), 4),
+           "nav_index": r(nav_index, 4), "nav_peak": r(nav_peak, 4), "drawdown_pct": r((nav_index / nav_peak - 1) * 100, 2), "period_return_pct": r(period_ret * 100, 2),
+           "risk_label": risk.get("label"), "regime": regime.get("regime", {}).get("label"),
+           "is_initial": False, "prior_as_of": prior.get("as_of")}
+    out["stats"] = {**prior.get("stats", {}), "positions": len(holdings), "book_pnl_pct": r(wmean([(h.get("pnl_pct"), h["weight"]) for h in holdings]), 1),
+                    "turnover": r(freed, 3), "pending_alerts": len(alerts)}
+    out.pop("memo", None)   # the memo belongs to the recalibration snapshot; the daily monitor keeps a pointer instead
+    out["memo_from"] = prior.get("memo_from") or prior.get("as_of")
+    out["memo"] = prior.get("memo")
+    return out
 
 
 def _theme_weights(exposures: list[dict]) -> dict[str, float]:
@@ -142,6 +236,15 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], scores: dict
     att_c = {c["ticker"]: c for c in (attention or {}).get("companies", [])}
     prior_holdings = {h["ticker"]: h for h in (prior or {}).get("holdings", [])}
     bench_3m = flows.get("benchmark", {}).get("return_3m") or 0
+    prior_as_of = date.fromisoformat(prior["as_of"]) if prior and prior.get("as_of") else None
+    last_recal = date.fromisoformat(prior["last_recalibration"]) if prior and prior.get("last_recalibration") else prior_as_of
+    if RULES["recalibration_cadence"] == "monthly" and prior is not None and last_recal is not None:
+        recalibrate = (today.year, today.month) != (last_recal.year, last_recal.month)
+    else:
+        recalibrate = True
+    if not recalibrate:
+        return _monitor(prior, strategies, analyses, companies, risk, flows, regime, themes_by_id, technicals, briefs,
+                        rotation_history, portfolio_value, today, prior_flows, last_recal)
 
     # 0. Book-level: NAV index since inception (approximate: weighted returns of the names held between runs),
     #    Turtle drawdown ladder, and the Faber/Antonacci regime gate on the index
@@ -217,7 +320,11 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], scores: dict
         if n_flags >= RULES["brief_trim_consecutive"]:
             info["trim"] = {"fraction": 0.5, "reason": f"Briefs flagged trim/review {n_flags} days running: " + flag_notes[0]}
         elif gain >= RULES["trim_gain_pct"] and (ta.get("rsi14") or 0) >= RULES["trim_rsi"]:
-            info["trim"] = {"fraction": RULES["trim_fraction"], "reason": f"Sell into strength: {gain:+.0f}% since entry with RSI {ta.get('rsi14'):.0f}"}
+            held_days = (today - entered).days
+            if held_days >= RULES["long_term_holding_days"]:
+                info["trim"] = {"fraction": RULES["trim_fraction"], "reason": f"Sell into strength: {gain:+.0f}% since entry with RSI {ta.get('rsi14'):.0f}"}
+            else:
+                info["deferred_trim"] = f"Trim into strength deferred: {gain:+.0f}% but held {held_days} days (< {RULES['long_term_holding_days']} for long-term gains)"
         incumbents_ok[t] = info
     cooldown = stopouts >= RULES["cooldown_stopouts"]
 
@@ -360,8 +467,11 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], scores: dict
             "opportunity": c["opportunity"], "gap": c["gap"], "reality": c["reality"], "narrative": c["narrative"], "pricing": c["pricing"],
             "quality": c["quality"], "growth": c["growth"], "value": c["value"], "macro_fit": r(c["macro_fit"], 0),
             "technical": {k: c["technical"][k] for k in ("score", "passes", "stage", "ready", "rsi14", "atr_pct", "rs_6m", "pct_from_52w_high")} if c["technical"] else None,
-            "rationale": c["rationale"], "notes": c["notes"], "brief_flags": inc.get("flags", 0), "brief_notes": inc.get("flag_notes", []),
+            "rationale": c["rationale"], "notes": c["notes"] + ([inc["deferred_trim"]] if inc.get("deferred_trim") else []),
+            "brief_flags": inc.get("flags", 0), "brief_notes": inc.get("flag_notes", []),
             "tech_fail_runs": inc.get("tech_fail_runs", 0),
+            "held_days": (today - date.fromisoformat(prev["entered"])).days if prev and prev.get("entered") else 0,
+            "long_term_gain_eligible": bool(prev and prev.get("entered") and (today - date.fromisoformat(prev["entered"])).days >= RULES["long_term_holding_days"]),
             "status": "held" if prev else "new", "entered": prev.get("entered") if prev else today.isoformat(),
             "entry_rules": entry_rules, "rule_status": inc.get("rules"), "prior_weight": prev["weight"] if prev else None,
         })
@@ -398,6 +508,9 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], scores: dict
 
     return {
         "as_of": today.isoformat(), "portfolio_value": portfolio_value, "rules": RULES,
+        "cadence": {"mode": "recalibrate", "last_recalibration": today.isoformat(), "next_recalibration": _next_recalibration(today),
+                    "note": "Monthly cadence: this run rebalanced the book; daily runs until the next month only monitor and alert."},
+        "last_recalibration": today.isoformat(), "alerts": [],
         "equity_weight": r(equity_actual, 4), "equity_cap": r(equity_cap, 4), "cash_weight": r(cash_total, 4),
         "beta_target": risk.get("posture", {}).get("beta_target", {}).get("recommended"),
         "risk_label": risk.get("label"), "regime": regime.get("regime", {}).get("label"),

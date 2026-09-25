@@ -57,7 +57,7 @@ def test_recalibration_exits_on_frozen_rule_breach_and_keeps_incumbents():
     first = portfolio.compute(strategies, analyses, scores, companies, RISK, FLOWS, REGIME, THEMES, None, 100_000, date(2026, 9, 2))
     # next week: A's revenue growth collapses below its frozen 10% floor; B unchanged
     analyses["A"] = _analysis(rg=0.05)
-    second = portfolio.compute(strategies, analyses, scores, companies, RISK, FLOWS, REGIME, THEMES, first, 100_000, date(2026, 9, 9), FLOWS)
+    second = portfolio.compute(strategies, analyses, scores, companies, RISK, FLOWS, REGIME, THEMES, first, 100_000, date(2026, 10, 2), FLOWS)
     assert not second["is_initial"]
     exits = {e["ticker"]: e for e in second["exits"]}
     assert "A" in exits and "Thesis break" in exits["A"]["reason"]
@@ -100,7 +100,7 @@ def test_drawdown_ladder_scales_risk_after_losses():
     first = portfolio.compute(strategies, analyses, scores, companies, RISK, FLOWS, REGIME, THEMES, None, 100_000, date(2026, 9, 2))
     for t in analyses:                       # every holding falls 12% but stays above its 12% hard stop? No: -12% breaches, so use -9%
         analyses[t] = _analysis(price=91.0)
-    second = portfolio.compute(strategies, analyses, scores, companies, RISK, FLOWS, REGIME, THEMES, first, 100_000, date(2026, 9, 9), FLOWS)
+    second = portfolio.compute(strategies, analyses, scores, companies, RISK, FLOWS, REGIME, THEMES, first, 100_000, date(2026, 10, 2), FLOWS)
     assert second["period_return_pct"] < 0 and second["drawdown_pct"] < 0
     assert second["nav_index"] < 1.0 and second["nav_peak"] == 1.0
 
@@ -111,3 +111,20 @@ def test_no_new_entries_into_sectors_with_capital_leaving():
     pf = portfolio.compute(strategies, analyses, scores, companies, RISK, flows, REGIME, THEMES, None, 100_000, date(2026, 9, 28))
     assert not any(h["sector"] == "Energy" for h in pf["holdings"])
     assert any("Capital leaving Energy" in x["reason"] for x in pf["rejected_technical"])
+
+
+def test_monthly_cadence_monitors_between_recalibrations_and_exits_only_on_hard_stop():
+    companies, strategies, analyses, scores = _universe()
+    first = portfolio.compute(strategies, analyses, scores, companies, RISK, FLOWS, REGIME, THEMES, None, 100_000, date(2026, 10, 1))
+    assert first["cadence"]["mode"] == "recalibrate" and first["cadence"]["next_recalibration"] == "2026-11-01"
+    # mid-month: A collapses below its 12% hard cap, B breaches a thesis rule -> alert only
+    analyses["A"] = _analysis(price=85.0); analyses["B"] = _analysis(rg=0.05)
+    mid = portfolio.compute(strategies, analyses, scores, companies, RISK, FLOWS, REGIME, THEMES, first, 100_000, date(2026, 10, 15), FLOWS)
+    assert mid["cadence"]["mode"] == "monitor"
+    assert [e["ticker"] for e in mid["exits"]] == ["A"] and "Hard loss cap" in mid["exits"][0]["reason"]
+    assert any(al["ticker"] == "B" and any("Thesis break" in x for x in al["actions"]) for al in mid["alerts"])
+    assert all(h["ticker"] != "A" for h in mid["holdings"]) and any(h["ticker"] == "B" for h in mid["holdings"])
+    assert all(t["action"] == "SELL" for t in mid["trades"])
+    # new month -> full recalibration trades again
+    nxt = portfolio.compute(strategies, analyses, scores, companies, RISK, FLOWS, REGIME, THEMES, mid, 100_000, date(2026, 11, 2), FLOWS)
+    assert nxt["cadence"]["mode"] == "recalibrate" and nxt["last_recalibration"] == "2026-11-02"

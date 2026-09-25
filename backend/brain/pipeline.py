@@ -225,6 +225,89 @@ def run_longterm(use_llm: bool = True) -> dict:
     return out
 
 
+# ------------------------------------------------------------------ Thesis v2 (Causal Futures Engine)
+T001 = ("By 2031, mainstream consumers will derive more practical value from AI systems that act, automate and protect on their "
+        "behalf (trusted delegation: scheduling, purchasing, cancelling, protecting accounts, detecting scams, managing bills, travel, "
+        "health information and vehicles) than from standalone AI systems primarily used to generate information or content. "
+        "Convenience and security become inseparable: the limiting factor shifts from 'is the AI intelligent enough' to 'do I trust "
+        "this system enough to let it act'.")
+
+
+def _thesis_v2_records() -> dict[str, dict]:
+    from sqlalchemy import desc
+    with session_scope() as s:
+        rows = s.execute(select(Snapshot).where(Snapshot.kind == "thesis_v2").order_by(desc(Snapshot.id))).scalars()
+        out: dict[str, dict] = {}
+        for x in rows:
+            out.setdefault(x.key, x.payload)      # latest per thesis id
+    return out
+
+
+def _save_thesis_v2(record: dict) -> None:
+    with session_scope() as s:
+        s.add(Snapshot(run_id=f"t2-{datetime.now().strftime('%Y%m%d-%H%M%S')}", kind="thesis_v2", key=record["id"], as_of=date.today(), payload=record))
+
+
+def _thesis_v2_context() -> dict:
+    briefs = load_briefs(10)
+    att = load_prior("attention") or {}
+    return {"recent_briefs": [{"date": b["as_of"], "summary": (b.get("llm") or {}).get("summary"),
+                               "human_behavior_long_term": (b.get("llm") or {}).get("human_behavior", {}).get("long_term", [])[:4],
+                               "claims": [c["claim"] for c in (b.get("llm") or {}).get("claims", [])[:6]]} for b in briefs if b.get("llm")][:6],
+            "attention_movers": {"themes_up": [(t["name"], t["wiki_vs_28d_pct"], t["rising_queries"][:5]) for t in att.get("movers", {}).get("themes_up", [])[:6]],
+                                 "not_priced": [x.get("ticker") or x.get("name") for x in att.get("movers", {}).get("not_priced", [])][:10]},
+            "long_term_thesis": (load_prior("longterm") or {}).get("thesis")}
+
+
+def run_thesis_v2_new(statement: str, thesis_id: Optional[str] = None) -> dict:
+    from .engines import causal
+    init_db()
+    existing = _thesis_v2_records()
+    tid = thesis_id or f"T-{len(existing) + 1:03d}"
+    with session_scope() as s:
+        universe = [{"ticker": c.ticker, "name": c.name, "sector": c.sector, "industry": c.industry} for c in s.execute(select(Company)).scalars()]
+    from .engines.themes import load_graph
+    log(f"thesis-v2: analysing {tid}: {statement[:80]}...")
+    t0 = time.time()
+    rec = causal.create(tid, statement, universe, [n["name"] for n in load_graph()], _thesis_v2_context())
+    _save_thesis_v2(rec)
+    log(f"thesis-v2: {tid} '{rec['title']}' prior {rec['probability']['prior']}% -> posterior {rec['probability']['posterior']}% "
+        f"[{rec['probability']['range_low']}-{rec['probability']['range_high']}] from {len(rec['analogues'])} analogues, {len(rec['evidence'])} evidence ({time.time() - t0:.0f}s)")
+    return rec
+
+
+def run_thesis_v2_update(thesis_id: Optional[str] = None, force: bool = False) -> list[dict]:
+    """Monthly 'what changed?' review. Without an id, updates every open thesis not yet reviewed this month."""
+    from .engines import causal
+    init_db()
+    out = []
+    for tid, rec in _thesis_v2_records().items():
+        if thesis_id and tid != thesis_id:
+            continue
+        if rec.get("status") != "open":
+            continue
+        last = rec.get("last_update") or rec.get("created")
+        if not force and not thesis_id and last and last[:7] == date.today().isoformat()[:7]:
+            continue
+        log(f"thesis-v2: monthly review of {tid}")
+        rec = causal.update(rec, _thesis_v2_context())
+        _save_thesis_v2(rec)
+        u = rec["updates"][-1]
+        log(f"thesis-v2: {tid} posterior {u['posterior_before']}% -> {u['posterior_after']}%; changed: {u['what_changed'][:2]}")
+        out.append(rec)
+    return out
+
+
+def run_thesis_v2_resolve(thesis_id: str, outcome: bool) -> dict:
+    from .engines import causal
+    rec = _thesis_v2_records().get(thesis_id)
+    if not rec:
+        raise ValueError(f"unknown thesis {thesis_id}")
+    rec = causal.resolve(rec, outcome)
+    _save_thesis_v2(rec)
+    return rec
+
+
 def run_attention() -> dict:
     """Attention Engine: Wikipedia / Stocktwits / app charts / GitHub / autocomplete -> attention snapshot."""
     from .engines import attention as attention_engine
@@ -398,7 +481,11 @@ def run(limit: Optional[int] = None, skip_ingest: bool = False, use_llm: bool = 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["run", "ingest", "brief", "morning", "attention", "longterm"])
+    ap.add_argument("cmd", choices=["run", "ingest", "brief", "morning", "attention", "longterm", "thesis-v2"])
+    ap.add_argument("--new", type=str, default=None, help="thesis-v2: statement of a new thesis")
+    ap.add_argument("--update", type=str, default=None, help="thesis-v2: id to review, or 'all'")
+    ap.add_argument("--resolve", type=str, default=None, help="thesis-v2: 'T-001:true|false'")
+    ap.add_argument("--seed", action="store_true", help="thesis-v2: create T-001 (trusted delegation)")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--skip-ingest", action="store_true")
     ap.add_argument("--no-llm", action="store_true")
@@ -409,6 +496,17 @@ def main() -> None:
         return
     if a.cmd == "longterm":
         run_longterm(use_llm=not a.no_llm)
+        return
+    if a.cmd == "thesis-v2":
+        if a.seed:
+            run_thesis_v2_new(T001, "T-001")
+        elif a.new:
+            run_thesis_v2_new(a.new)
+        elif a.update:
+            run_thesis_v2_update(None if a.update == "all" else a.update, force=True)
+        elif a.resolve:
+            tid, val = a.resolve.split(":")
+            run_thesis_v2_resolve(tid, val.lower() == "true")
         return
     if a.cmd == "brief":
         run_brief(use_llm=not a.no_llm)
@@ -423,6 +521,11 @@ def main() -> None:
             run_longterm(use_llm=not a.no_llm)
         except Exception as e:
             log(f"longterm: failed ({e}); continuing with the previous thesis")
+        if not a.no_llm:
+            try:
+                run_thesis_v2_update()          # only theses not yet reviewed this calendar month
+            except Exception as e:
+                log(f"thesis-v2: monthly review failed ({e}); continuing")
         run(a.limit, a.skip_ingest, not a.no_llm)
         return
     if a.cmd == "ingest":

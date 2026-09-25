@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { IS_STATIC } from "@/lib/static";
 import type { ComponentKey, EpistemicKind, MultipleKey } from "@/lib/types";
 import { TREND_CRITERIA } from "@/lib/types";
 import {
@@ -32,7 +33,14 @@ import { ScoreBadge } from "@/components/ScoreBadge";
 import { Section } from "@/components/Section";
 import { Sparkline } from "@/components/Sparkline";
 
-export const dynamic = "force-dynamic";
+export * from "@/lib/segment-config-dynamic-route";
+
+/** Static export: one page per ticker in the exported universe (public/data/api/companies.json). Live mode renders on demand. */
+export async function generateStaticParams(): Promise<{ ticker: string }[]> {
+  if (!IS_STATIC) return [];
+  const res = await api.companies();
+  return res.ok ? res.data.map((c) => ({ ticker: c.ticker })) : [];
+}
 
 export async function generateMetadata({ params }: { params: Promise<{ ticker: string }> }) {
   const { ticker } = await params;
@@ -167,7 +175,7 @@ export default async function CompanyPage({ params }: { params: Promise<{ ticker
       />
 
       {/* Reality / Narrative / Pricing */}
-      <div className="mb-4 grid gap-3 sm:grid-cols-4">
+      <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Tile label="Reality" value={num(st.reality, 0)} sub={<>growth {num(scores?.growth, 0)} · quality {num(scores?.quality, 0)} · accel {num(scores?.acceleration, 0)} · macro fit {num(st.macro_fit, 0)}</>} />
         <Tile
           label="Narrative"
@@ -297,6 +305,7 @@ export default async function CompanyPage({ params }: { params: Promise<{ ticker
       <div className="grid gap-4 lg:grid-cols-2">
         {/* Score breakdown */}
         <Section title="Score breakdown" subtitle={coveragePct === null ? "Spec weights" : `Spec weights · ${coveragePct}% of weights available, renormalised`} flush>
+          <div className="tbl-wrap">
           <table className="tbl">
             <thead>
               <tr>
@@ -332,6 +341,7 @@ export default async function CompanyPage({ params }: { params: Promise<{ ticker
               })}
             </tbody>
           </table>
+          </div>
         </Section>
 
         {/* Checks */}
@@ -342,7 +352,7 @@ export default async function CompanyPage({ params }: { params: Promise<{ ticker
                 <span className={`w-4 shrink-0 text-center ${c.ok === true ? "text-pos" : c.ok === false ? "text-neg" : "text-subtle"}`}>
                   {c.ok === true ? "✓" : c.ok === false ? "✗" : "○"}
                 </span>
-                <span className="w-56 shrink-0">{c.label}</span>
+                <span className="w-36 shrink-0 sm:w-56">{c.label}</span>
                 <span className="min-w-0 text-muted">{c.evidence}</span>
               </li>
             ))}
@@ -413,6 +423,7 @@ export default async function CompanyPage({ params }: { params: Promise<{ ticker
         {/* Theme exposures */}
         <Section title="Theme exposures" subtitle="Weight = share of the story tied to the theme · order 1 = first-order beneficiary" className="lg:col-span-2" flush>
           {(st.theme_exposures ?? []).length ? (
+            <div className="tbl-wrap">
             <table className="tbl">
               <thead>
                 <tr>
@@ -435,6 +446,7 @@ export default async function CompanyPage({ params }: { params: Promise<{ ticker
                 ))}
               </tbody>
             </table>
+            </div>
           ) : (
             <div className="px-4 py-3 text-[12.5px] text-muted">Not mapped to any theme in the knowledge graph.</div>
           )}
@@ -466,6 +478,7 @@ export default async function CompanyPage({ params }: { params: Promise<{ ticker
         </Section>
 
         <Section title="Valuation" subtitle={<>Cheapness vs own 5y history {num(V.cheapness_vs_history, 0)}/100</>} flush>
+          <div className="tbl-wrap">
           <table className="tbl">
             <thead>
               <tr>
@@ -495,6 +508,7 @@ export default async function CompanyPage({ params }: { params: Promise<{ ticker
               })}
             </tbody>
           </table>
+          </div>
           <div className="grid gap-x-8 px-4 py-2 sm:grid-cols-2">
             <div>
               <KV label="FCF yield" value={pct(V.fcf_yield)} />
@@ -567,7 +581,7 @@ export default async function CompanyPage({ params }: { params: Promise<{ ticker
 
         {/* Momentum */}
         <Section title="Price momentum" className="lg:col-span-2">
-          <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
             {[
               { label: "1m", v: M.return_1m },
               { label: "3m", v: M.return_3m },

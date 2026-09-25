@@ -1,0 +1,17 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "cd frontend && npm ci && npm run build:static",
+  "outputDirectory": "frontend/out",
+  "framework": null,
+  "headers": [
+    {
+      "source": "/data/api/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, s-maxage=300, stale-while-revalidate=60"
+        }
+      ]
+    }
+  ]
+}

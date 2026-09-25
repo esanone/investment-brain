@@ -6,7 +6,7 @@ import { Meter } from "@/components/Meter";
 import { PageHeader } from "@/components/PageHeader";
 import { Section } from "@/components/Section";
 
-export const dynamic = "force-dynamic";
+export * from "@/lib/segment-config";
 export const metadata: Metadata = { title: "Risk" };
 
 export default async function RiskPage() {

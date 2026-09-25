@@ -7,7 +7,7 @@ import { FlowTable } from "@/components/FlowTable";
 import { PageHeader } from "@/components/PageHeader";
 import { Section } from "@/components/Section";
 
-export const dynamic = "force-dynamic";
+export * from "@/lib/segment-config";
 export const metadata: Metadata = { title: "Flows" };
 
 export default async function FlowsPage() {

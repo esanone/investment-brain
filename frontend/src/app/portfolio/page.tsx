@@ -10,7 +10,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { ScoreBadge } from "@/components/ScoreBadge";
 import { Section } from "@/components/Section";
 
-export const dynamic = "force-dynamic";
+export * from "@/lib/segment-config";
 export const metadata: Metadata = { title: "Portfolio" };
 
 const ACTION_CLASS: Record<TradeAction, string> = {
@@ -202,7 +202,7 @@ export default async function PortfolioPage() {
         meta={<>as of {date(p.as_of)} · rules-based, recalibrated every run</>}
       />
 
-      <div className="mb-4 grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <Tile label="Wtd opportunity" value={num(s?.weighted_opportunity, 0)} sub="weight-averaged strategist score" />
         <Tile label="Wtd expectations gap" value={signed(s?.weighted_gap, 0)} cls={signClass(s?.weighted_gap)} sub="reality − pricing" />
         <Tile
@@ -426,6 +426,7 @@ export default async function PortfolioPage() {
             <div className="border-b border-line px-3 py-2 text-[12px] text-muted">
               Non-equity sleeves · {pct(1 - (p.equity_weight ?? 0), 1)} of the book, split by the Risk engine&apos;s posture
             </div>
+            <div className="tbl-wrap">
             <table className="tbl">
               <thead>
                 <tr>
@@ -451,6 +452,7 @@ export default async function PortfolioPage() {
                 )}
               </tbody>
             </table>
+            </div>
           </div>
         </Section>
 

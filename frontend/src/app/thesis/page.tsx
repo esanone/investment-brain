@@ -8,7 +8,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Section } from "@/components/Section";
 import { StructuralShiftsTable } from "@/components/StructuralShiftsTable";
 
-export const dynamic = "force-dynamic";
+export * from "@/lib/segment-config";
 export const metadata: Metadata = { title: "Long-term thesis" };
 
 /** Fraction or 0-100 -> 0-100 for the Meter. */

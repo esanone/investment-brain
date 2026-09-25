@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { IS_STATIC, staticSearch } from "@/lib/static";
 import type { SearchResult } from "@/lib/types";
 
 type Status = "idle" | "loading" | "ready" | "unavailable";
@@ -15,6 +16,8 @@ const TICKER_RE = /^[A-Z][A-Z0-9.\-]{0,7}$/;
  * on every page; "/" focuses it, arrows + Enter pick a row, Escape closes.
  * Registry-only names (not in the scored universe) are tagged so the user knows
  * the company page will offer on-demand analysis instead of a snapshot.
+ * In the static export the search runs client-side over the exported universe
+ * (/data/api/companies.json) and there is no SEC fallthrough for unknown tickers.
  */
 export function TickerSearch({ className = "", align = "left" }: { className?: string; align?: "left" | "right" }) {
   const router = useRouter();
@@ -62,7 +65,7 @@ export function TickerSearch({ className = "", align = "left" }: { className?: s
     if (!text) return;
     const ctrl = new AbortController();
     const timer = setTimeout(async () => {
-      const res = await api.search(text, 12, ctrl.signal);
+      const res = IS_STATIC ? await staticSearch(text, 12) : await api.search(text, 12, ctrl.signal);
       if (id !== seq.current) return;
       if (res.ok) {
         setResults(res.data);
@@ -120,8 +123,9 @@ export function TickerSearch({ className = "", align = "left" }: { className?: s
         return;
       }
       // No rows (or search down): a bare ticker still routes to its page, which offers on-demand analysis.
+      // Not in the static export: only exported company pages exist, so an unknown ticker would just 404.
       const typed = q.trim().toUpperCase();
-      if (status !== "loading" && TICKER_RE.test(typed)) go(typed);
+      if (!IS_STATIC && status !== "loading" && TICKER_RE.test(typed)) go(typed);
     }
   }
 
@@ -198,7 +202,13 @@ export function TickerSearch({ className = "", align = "left" }: { className?: s
           })}
           {!results.length && (
             <li className="px-2.5 py-2 text-[12px] text-muted">
-              {status === "loading" ? "Searching…" : status === "unavailable" ? "Search unavailable — API not reachable" : "No matches"}
+              {status === "loading"
+                ? "Searching…"
+                : status === "unavailable"
+                  ? IS_STATIC
+                    ? "Search unavailable — could not load the universe"
+                    : "Search unavailable — API not reachable"
+                  : "No matches"}
             </li>
           )}
           {results.length > 0 && (

@@ -3,7 +3,9 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { API_BASE, api } from "@/lib/api";
+import { IS_STATIC } from "@/lib/static";
 import type { Health } from "@/lib/types";
+import { StaticRunNote } from "@/components/StaticRunNote";
 
 type Phase = "idle" | "starting" | "running" | "error";
 
@@ -11,8 +13,14 @@ type Phase = "idle" | "starting" | "running" | "error";
  * POSTs /api/attention/run, then polls /api/health until `running_attention` is
  * false and refreshes the server components so the new snapshot shows up. Same
  * shape as BriefRunButton, kept separate so the jobs can run side by side.
+ * In the static export there is nothing to run, so a muted note renders instead.
  */
-export function AttentionRunButton({ initialRunning = false }: { initialRunning?: boolean }) {
+export function AttentionRunButton(props: { initialRunning?: boolean }) {
+  if (IS_STATIC) return <StaticRunNote />;
+  return <LiveAttentionRunButton {...props} />;
+}
+
+function LiveAttentionRunButton({ initialRunning = false }: { initialRunning?: boolean }) {
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>(initialRunning ? "running" : "idle");
   const [error, setError] = useState<string | null>(null);

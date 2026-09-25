@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { IS_STATIC } from "@/lib/static";
 import type { Theme } from "@/lib/types";
 import { ATTENTION_SOURCE_LABELS, num, ptsSigned, signed, signClass, weight } from "@/lib/format";
 import { AttentionFlags } from "@/components/AttentionFlags";
@@ -9,7 +10,14 @@ import { PageHeader } from "@/components/PageHeader";
 import { ScoreBadge } from "@/components/ScoreBadge";
 import { Section } from "@/components/Section";
 
-export const dynamic = "force-dynamic";
+export * from "@/lib/segment-config-dynamic-route";
+
+/** Static export: one page per theme in the exported snapshot (public/data/api/themes.json). Live mode renders on demand. */
+export async function generateStaticParams(): Promise<{ id: string }[]> {
+  if (!IS_STATIC) return [];
+  const res = await api.themes();
+  return res.ok ? res.data.map((t) => ({ id: t.id })) : [];
+}
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

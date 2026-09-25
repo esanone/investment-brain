@@ -21,6 +21,7 @@ import type {
   Thesis,
   ThesisHistoryRow,
 } from "./types";
+import { IS_STATIC, staticFileFor } from "./static";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -29,11 +30,45 @@ export type ApiResult<T> =
   | { ok: false; status: number | null; message: string };
 
 /**
+ * Static export, server side (i.e. `next build` prerendering): read the endpoint's
+ * exported file from public/data instead of calling the API. Same contract as a
+ * live request — a missing file is a 404 `{ ok: false }`, anything else a null-status
+ * failure, never a throw. The Node built-ins are imported lazily with bundler
+ * ignore hints so this module stays importable from client components.
+ */
+async function readStaticJson<T>(path: string): Promise<ApiResult<T>> {
+  const rel = staticFileFor(path);
+  try {
+    const [fs, nodePath] = await Promise.all([
+      import(/* webpackIgnore: true */ /* turbopackIgnore: true */ "node:fs/promises"),
+      import(/* webpackIgnore: true */ /* turbopackIgnore: true */ "node:path"),
+    ]);
+    const file = nodePath.join(process.cwd(), "public", "data", ...rel.split("/"));
+    let raw: string;
+    try {
+      raw = await fs.readFile(file, "utf8");
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") {
+        return { ok: false, status: 404, message: `Not in the static snapshot (${rel})` };
+      }
+      throw e;
+    }
+    return { ok: true, data: JSON.parse(raw) as T };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return { ok: false, status: null, message: `Could not read the static snapshot for ${path} (${message})` };
+  }
+}
+
+/**
  * Request against the FastAPI backend (server components and browser alike).
  * Never throws: a down backend or a 404 "No snapshot yet" both come back as
  * `{ ok: false }` so pages can render an empty state instead of crashing.
+ * In the static export (NEXT_PUBLIC_STATIC=1) server-side calls read the
+ * pre-exported JSON from public/data instead; see readStaticJson.
  */
 async function request<T>(path: string, init: RequestInit): Promise<ApiResult<T>> {
+  if (IS_STATIC && typeof window === "undefined") return readStaticJson<T>(path);
   try {
     const res = await fetch(`${API_BASE}${path}`, { cache: "no-store", ...init });
     if (!res.ok) {

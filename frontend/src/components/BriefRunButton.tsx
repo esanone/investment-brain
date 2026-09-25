@@ -3,7 +3,9 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { API_BASE, api } from "@/lib/api";
+import { IS_STATIC } from "@/lib/static";
 import type { Health } from "@/lib/types";
+import { StaticRunNote } from "@/components/StaticRunNote";
 
 type Phase = "idle" | "starting" | "running" | "error";
 
@@ -11,8 +13,14 @@ type Phase = "idle" | "starting" | "running" | "error";
  * POSTs /api/brief/run, then polls /api/health until `running_brief` is false
  * and refreshes the server components so the new brief shows up. Same shape as
  * RunButton, kept separate so the two jobs can run side by side.
+ * In the static export there is nothing to run, so a muted note renders instead.
  */
-export function BriefRunButton({ initialRunning = false }: { initialRunning?: boolean }) {
+export function BriefRunButton(props: { initialRunning?: boolean }) {
+  if (IS_STATIC) return <StaticRunNote />;
+  return <LiveBriefRunButton {...props} />;
+}
+
+function LiveBriefRunButton({ initialRunning = false }: { initialRunning?: boolean }) {
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>(initialRunning ? "running" : "idle");
   const [error, setError] = useState<string | null>(null);

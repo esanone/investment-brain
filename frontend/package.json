@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:static": "NEXT_PUBLIC_STATIC=1 next build",
     "start": "next start",
     "lint": "eslint",
     "api": "cd ../backend && exec .venv/bin/uvicorn brain.api:app --host 127.0.0.1 --port 8000"

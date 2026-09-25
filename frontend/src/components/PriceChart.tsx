@@ -13,6 +13,7 @@ import {
   type LogicalRange,
 } from "lightweight-charts";
 import { api } from "@/lib/api";
+import { IS_STATIC, staticPrices } from "@/lib/static";
 import type { PriceInterval, PriceRange, Prices } from "@/lib/types";
 import { num, price as fmtPrice, ptsSigned, signClass } from "@/lib/format";
 
@@ -228,13 +229,15 @@ export function PriceChart({ symbol }: { symbol: string }) {
   }, []);
 
   // Data: refetch when the symbol or timeframe changes. Loading is derived (status.key lags reqKey) rather than set in the effect.
+  // Static export: the 1y_1d / 5y_1w files under /data/api/prices are fetched directly and sliced to the range client-side.
   const interval = RANGES.find((r) => r.key === prefs.range)?.interval ?? "1d";
   const reqKey = `${symbol.toUpperCase()}|${prefs.range}`;
   useEffect(() => {
     const ctrl = new AbortController();
     let cancelled = false;
     const key = reqKey;
-    api.prices(symbol, prefs.range, interval, ctrl.signal).then((res) => {
+    const load = IS_STATIC ? staticPrices(symbol, prefs.range, ctrl.signal) : api.prices(symbol, prefs.range, interval, ctrl.signal);
+    load.then((res) => {
       if (cancelled) return;
       if (res.ok) setStatus({ kind: "ready", key, data: res.data });
       else if (res.status === 404) setStatus({ kind: "missing", key, message: res.message });

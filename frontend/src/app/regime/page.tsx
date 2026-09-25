@@ -8,7 +8,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { ProbabilityChart, REGIME_COLORS } from "@/components/ProbabilityChart";
 import { Section } from "@/components/Section";
 
-export const dynamic = "force-dynamic";
+export * from "@/lib/segment-config";
 export const metadata: Metadata = { title: "Regime" };
 
 export default async function RegimePage() {
@@ -39,7 +39,8 @@ export default async function RegimePage() {
               <div key={k} style={{ width: `${Math.max(0, r.regime?.probabilities?.[k] ?? 0)}%`, background: REGIME_COLORS[k] }} />
             ))}
           </div>
-          <table className="tbl mt-3">
+          <div className="tbl-wrap mt-3">
+          <table className="tbl">
             <thead>
               <tr>
                 <th>Regime</th>
@@ -66,6 +67,7 @@ export default async function RegimePage() {
               })}
             </tbody>
           </table>
+          </div>
           <div className="mt-4 rounded border border-line bg-surface-2 px-3 py-2.5 text-[13px]">
             <div className="font-medium">{r.regime?.label}</div>
             <div className="mt-0.5 text-muted">{r.regime?.description}</div>

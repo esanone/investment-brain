@@ -13,7 +13,7 @@ import { RunButton } from "@/components/RunButton";
 import { ScoreBadge } from "@/components/ScoreBadge";
 import { Section } from "@/components/Section";
 
-export const dynamic = "force-dynamic";
+export * from "@/lib/segment-config";
 
 const TREND_GLYPH: Record<string, string> = { accelerating: "▲", steady: "→", decelerating: "▼" };
 
@@ -227,7 +227,8 @@ export default async function DashboardPage() {
           <div className="mt-2">
             <Meter label={<span className="text-muted">Risk score</span>} value={d.risk.score} size="sm" />
           </div>
-          <table className="tbl mt-3">
+          <div className="tbl-wrap mt-3">
+          <table className="tbl">
             <thead>
               <tr>
                 <th>Asset</th>
@@ -258,6 +259,7 @@ export default async function DashboardPage() {
               </tr>
             </tbody>
           </table>
+          </div>
         </Section>
 
         {/* PORTFOLIO */}

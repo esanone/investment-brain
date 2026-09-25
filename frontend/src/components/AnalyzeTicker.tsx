@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { api } from "@/lib/api";
+import { IS_STATIC } from "@/lib/static";
+import { StaticRunNote } from "@/components/StaticRunNote";
 
 type Phase = "idle" | "running" | "done" | "error";
 
@@ -12,8 +14,42 @@ type Phase = "idle" | "running" | "done" | "error";
  * current run). POSTs /api/companies/{ticker}/analyze, then refreshes the server
  * component so the freshly scored payload renders in place. 422/500 reasons
  * (pre-revenue, foreign filer, …) are shown inline.
+ * In the static export on-demand analysis is not available, so the card carries
+ * a muted note instead of the button.
  */
-export function AnalyzeTicker({ ticker, message }: { ticker: string; message?: string }) {
+export function AnalyzeTicker(props: { ticker: string; message?: string }) {
+  if (IS_STATIC) return <StaticAnalyzeTicker {...props} />;
+  return <LiveAnalyzeTicker {...props} />;
+}
+
+function StaticAnalyzeTicker({ ticker, message }: { ticker: string; message?: string }) {
+  const t = ticker.toUpperCase();
+  return (
+    <div className="mx-auto mt-10 max-w-2xl rounded-md border border-line bg-surface px-6 py-6">
+      <h2 className="text-[15px] font-semibold">
+        <span className="mono text-[15px]">{t}</span> is not in the current run
+      </h2>
+      <p className="mt-1 text-[13px] text-muted">
+        The weekly pipeline only scores the configured universe. Press <kbd className="rounded border border-line px-1 text-[10px]">/</kbd> to
+        search it, or{" "}
+        <Link href="/companies" className="hover:text-accent">
+          browse the universe
+        </Link>
+        .
+      </p>
+      <div className="mt-4">
+        <StaticRunNote />
+      </div>
+      {message && (
+        <p className="mt-4 text-[11.5px] text-subtle">
+          Snapshot: <span className="mono">{message}</span>
+        </p>
+      )}
+    </div>
+  );
+}
+
+function LiveAnalyzeTicker({ ticker, message }: { ticker: string; message?: string }) {
   const router = useRouter();
   const t = ticker.toUpperCase();
   const [phase, setPhase] = useState<Phase>("idle");

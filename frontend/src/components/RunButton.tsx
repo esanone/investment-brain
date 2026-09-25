@@ -3,15 +3,23 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { API_BASE } from "@/lib/api";
+import { IS_STATIC } from "@/lib/static";
 import type { Health } from "@/lib/types";
+import { StaticRunNote } from "@/components/StaticRunNote";
 
 type Phase = "idle" | "starting" | "running" | "error";
 
 /**
  * POSTs /api/run?skip_ingest=true, then polls /api/health until `running` is
  * false and refreshes the server components so the new snapshot shows up.
+ * In the static export there is nothing to run, so a muted note renders instead.
  */
-export function RunButton({ initialRunning = false }: { initialRunning?: boolean }) {
+export function RunButton(props: { initialRunning?: boolean }) {
+  if (IS_STATIC) return <StaticRunNote />;
+  return <LiveRunButton {...props} />;
+}
+
+function LiveRunButton({ initialRunning = false }: { initialRunning?: boolean }) {
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>(initialRunning ? "running" : "idle");
   const [error, setError] = useState<string | null>(null);

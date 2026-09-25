@@ -140,6 +140,21 @@ def index_gate(spy: Optional[pd.DataFrame], fedfunds: Optional[pd.Series]) -> di
             "note": f"SPY {last:.0f} vs 10m SMA {sma10m:.0f} ({'above' if faber else 'below'}); 12m {ret12:+.1f}% vs T-bills {tbill:.2f}% ({'ahead' if antonacci else 'behind'})"}
 
 
+def load_rotation_history(n: int = 30) -> dict[str, list]:
+    """{sector: [(as_of date, rotation score), ...]} oldest first, one reading per day, from prior flows snapshots."""
+    from sqlalchemy import desc
+    with session_scope() as s:
+        rows = s.execute(select(Snapshot).where(Snapshot.kind == "flows").order_by(desc(Snapshot.id)).limit(n * 3)).scalars()
+        seen, out = set(), {}
+        for x in rows:
+            if x.as_of in seen:
+                continue
+            seen.add(x.as_of)
+            for sector, score in (x.payload.get("sector_rotation") or {}).items():
+                out.setdefault(sector, []).append((x.as_of, score))
+    return {k: sorted(v)[-n:] for k, v in out.items()}
+
+
 def load_prior(kind: str) -> Optional[dict]:
     """Latest persisted snapshot of a kind (from the previous run)."""
     from sqlalchemy import desc
@@ -290,9 +305,11 @@ def compute_all(frames: dict, as_of: date, use_llm: bool, llm_top_n: Optional[in
     longterm, attention = load_prior("longterm"), load_prior("attention")
     log(f"engine: portfolio (long-term mode; {sum(1 for v in technicals.values() if v['ready'])}/{len(technicals)} names pass the trend template; "
         f"long-term thesis {'from ' + longterm['as_of'] if longterm else 'not built yet'})")
+    rotation_history = load_rotation_history(30)
     portfolio = portfolio_engine.compute(strategies, analyses, scores, companies, risk, flows, regime, themes_by_id,
                                          prior_pf, settings.portfolio_value, as_of, prior_flows,
-                                         technicals=technicals, longterm=longterm, attention=attention, briefs=load_briefs(5))
+                                         technicals=technicals, longterm=longterm, attention=attention, briefs=load_briefs(5),
+                                         rotation_history=rotation_history)
     log(f"engine: portfolio = {portfolio['stats']['positions']} positions, equity {portfolio['equity_weight']:.0%} (cap {portfolio['equity_cap']:.0%}, "
         f"cash {portfolio['cash_weight']:.0%}), {len(portfolio['trades'])} trades, {len(portfolio['exits'])} exits, "
         f"{len(portfolio['rejected_technical'])} rejected by the technical gate" + (" (initial)" if portfolio["is_initial"] else ""))

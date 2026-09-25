@@ -71,8 +71,15 @@ def test_rule_evaluator_handles_each_metric_kind():
     ctx = {"latest": {"roic": 0.1}, "momentum": {"dist_200dma": -12}, "sector_rotation": -25, "sector_rotation_prev": -30,
            "adverse_regime_prob": 60, "theme_trends": {"ai": 40}, "rs_3m": -3}
     assert portfolio.evaluate_rule({"metric": "roic", "op": "<", "threshold": 0.15}, ctx)["triggered"]
-    assert portfolio.evaluate_rule({"metric": "sector_rotation", "op": "<", "threshold": -20, "consecutive": 2}, ctx)["triggered"]
-    assert not portfolio.evaluate_rule({"metric": "sector_rotation", "op": "<", "threshold": -20, "consecutive": 2}, dict(ctx, sector_rotation_prev=0))["triggered"]
+    from datetime import timedelta
+    today = date(2026, 9, 28)
+    two_weeks_weak = [(today - timedelta(days=d), -45) for d in (14, 12, 9, 7, 5, 2)]
+    ctx_rot = dict(ctx, sector_rotation=-40, as_of=today, sector_rotation_history=two_weeks_weak)
+    assert portfolio.evaluate_rule({"metric": "sector_rotation", "op": "<", "threshold": -20, "consecutive": 2}, ctx_rot)["triggered"]   # legacy rule, new mechanism
+    two_days_weak = [(today - timedelta(days=1), -60)]
+    assert not portfolio.evaluate_rule({"metric": "sector_rotation", "op": "<", "threshold": -30}, dict(ctx_rot, sector_rotation_history=two_days_weak))["triggered"]
+    recovered = two_weeks_weak[:-2] + [(today - timedelta(days=5), -10), (today - timedelta(days=2), -50)]
+    assert not portfolio.evaluate_rule({"metric": "sector_rotation", "op": "<", "threshold": -30}, dict(ctx_rot, sector_rotation_history=recovered))["triggered"]
     assert portfolio.evaluate_rule({"metric": "adverse_regime_prob", "op": ">", "threshold": 55}, ctx)["triggered"]
     assert portfolio.evaluate_rule({"metric": "dist_200dma", "op": "<", "threshold": -10, "and_negative_rs": True}, ctx)["triggered"]
     assert not portfolio.evaluate_rule({"metric": "dist_200dma", "op": "<", "threshold": -10, "and_negative_rs": True}, dict(ctx, rs_3m=2))["triggered"]

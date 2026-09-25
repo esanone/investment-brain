@@ -39,6 +39,7 @@ RULES = {
     "regime_gate": True, "drawdown_ladder": [[-10.0, 0.5, 0.8], [-20.0, 0.25, 0.64]],   # [book drawdown %, risk-per-position multiplier, equity-cap multiplier]
     "brief_trim_consecutive": 2, "brief_exit_consecutive": 3,
     "earnings_blackout_days": 5, "cooldown_stopouts": 3,
+    "rotation_break_threshold": -30, "rotation_break_days": 12,   # sector rotation must stay below -30 for two consecutive weeks of readings
     "incumbency_bonus": 1.10, "attention_not_priced_bonus": 1.15, "crowded_penalty": 0.75,
 }
 SLEEVE_PROXIES = {
@@ -55,9 +56,21 @@ def evaluate_rule(rule: dict, ctx: dict) -> dict:
     """ctx: latest fundamentals, momentum, sector_rotation, sector_rotation_prev, adverse_regime_prob, theme_trends, rs_3m."""
     m = rule["metric"]
     if m == "sector_rotation":
+        # Mechanism-level rule (applies to legacy frozen rules too): the sector's rotation score must stay below the
+        # threshold for every reading across at least `rotation_break_days` days, i.e. two consecutive weeks of runs.
         cur = ctx.get("sector_rotation")
-        prev = ctx.get("sector_rotation_prev")
-        hit = cur is not None and cur < rule["threshold"] and (rule.get("consecutive", 1) < 2 or (prev is not None and prev < rule["threshold"]))
+        thr = RULES["rotation_break_threshold"]
+        hist = [(d, v) for d, v in (ctx.get("sector_rotation_history") or []) if v is not None]
+        if cur is not None:
+            hist = hist + [(ctx.get("as_of"), cur)] if not hist or hist[-1][0] != ctx.get("as_of") else hist
+        hit = False
+        if cur is not None and cur < thr and len(hist) >= 2:
+            from datetime import date as _date
+            last = hist[-1][0]
+            window = [(d, v) for d, v in hist if d and last and (last - d).days <= RULES["rotation_break_days"] + 2]
+            span = (window[-1][0] - window[0][0]).days if len(window) >= 2 else 0
+            hit = span >= RULES["rotation_break_days"] and all(v < thr for _, v in window)
+        rule = {**rule, "threshold": thr, "label": rule.get("label", "sector rotation") + " (2 consecutive weeks)"}
     elif m == "adverse_regime_prob":
         cur = ctx.get("adverse_regime_prob")
         hit = cur is not None and cur > rule["threshold"]
@@ -115,7 +128,8 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], scores: dict
             risk: dict, flows: dict, regime: dict, themes_by_id: dict[str, dict], prior: Optional[dict],
             portfolio_value: float, as_of: Optional[date] = None, prior_flows: Optional[dict] = None,
             technicals: Optional[dict[str, dict]] = None, longterm: Optional[dict] = None, attention: Optional[dict] = None,
-            briefs: Optional[list[dict]] = None) -> dict:
+            briefs: Optional[list[dict]] = None, rotation_history: Optional[dict[str, list]] = None) -> dict:
+    """rotation_history: {sector: [(date, rotation_score), ...]} from prior flows snapshots (oldest first)."""
     today = as_of or date.today()
     technicals, briefs = technicals or {}, briefs or []
     probs = regime.get("regime", {}).get("probabilities", {})
@@ -167,7 +181,8 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], scores: dict
         ta = technicals.get(t) or {}
         stops = _stop_levels(entry, ta.get("atr20"), price, trail_high, gain)
         ctx = {"latest": a["latest"], "momentum": a["momentum"], "sector_rotation": rot.get(companies[t]["sector"]),
-               "sector_rotation_prev": rot_prev.get(companies[t]["sector"]), "adverse_regime_prob": adverse,
+               "sector_rotation_prev": rot_prev.get(companies[t]["sector"]), "adverse_regime_prob": adverse, "as_of": today,
+               "sector_rotation_history": (rotation_history or {}).get(companies[t]["sector"], []),
                "theme_trends": theme_trends, "rs_3m": (a["momentum"].get("return_3m") or 0) - bench_3m}
         evaluated = [evaluate_rule(rule, ctx) for rule in h.get("entry_rules", [])]
         triggered = [e for e in evaluated if e["triggered"]]

@@ -170,8 +170,8 @@ def compute(company: dict, analysis: dict, scores: dict, exposures: list[dict], 
         breaks.append(f"Operating margin compresses more than 200 bps YoY (currently {L['operating_margin'] * 100:.1f}%)")
         rules.append({"id": "margin", "label": "Operating margin change YoY", "metric": "operating_margin_change", "op": "<", "threshold": -0.02, "current": L.get("operating_margin_change")})
     if sector_rot is not None:
-        breaks.append(f"{sector} rotation score turns below -20 for two consecutive runs (currently {sector_rot:+.0f})")
-        rules.append({"id": "rotation", "label": f"{sector} rotation score", "metric": "sector_rotation", "op": "<", "threshold": -20, "consecutive": 2, "current": sector_rot})
+        breaks.append(f"{sector} rotation score stays below -30 for two consecutive weeks (currently {sector_rot:+.0f})")
+        rules.append({"id": "rotation", "label": f"{sector} rotation score", "metric": "sector_rotation", "op": "<", "threshold": -30, "consecutive_weeks": 2, "current": sector_rot})
     breaks.append("Adverse regime (Stagflation + Contraction) probability exceeds 55%")
     rules.append({"id": "regime", "label": "P(Stagflation)+P(Contraction)", "metric": "adverse_regime_prob", "op": ">", "threshold": 55,
                   "current": sum(regime.get("regime", {}).get("probabilities", {}).get(k, 0) for k in ("Stagflation", "Contraction"))})

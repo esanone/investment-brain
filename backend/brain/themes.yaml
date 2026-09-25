@@ -1,0 +1,317 @@
+# Theme Knowledge Graph (Phase 1 seed).
+# Each theme: children (sub-nodes), the human need it serves, the
+# Trend -> Constraint -> Required solution chain, related ETFs, and company exposures.
+# Exposure weight = share of the company's story tied to the theme (0..1);
+# order = 1 first-order beneficiary, 2 second-order, 3 third-order.
+
+themes:
+  - id: ai-infrastructure
+    name: AI Infrastructure
+    description: Build-out of accelerated compute datacenters for training and inference.
+    human_needs: [productivity, knowledge, time]
+    horizon_years: "3-7"
+    constraints:
+      - trend: Model capability scales with compute
+        constraint: GPU supply, power availability, cooling, network bandwidth
+        solution: Accelerators, optical/electrical interconnect, HBM memory, liquid cooling, on-site power
+    related_etfs: [SMH, GRID, XLU]
+    children:
+      - id: ai-gpus
+        name: Accelerators
+        exposures: {NVDA: [0.9, 1], AMD: [0.6, 1], AVGO: [0.6, 1], MRVL: [0.7, 1]}
+      - id: ai-networking
+        name: Networking & Interconnect
+        exposures: {ANET: [0.8, 1], CRDO: [0.9, 1], ALAB: [0.9, 1], COHR: [0.6, 1], CIEN: [0.5, 1], AVGO: [0.2, 1]}
+      - id: ai-memory
+        name: Memory
+        exposures: {MU: [0.7, 1]}
+      - id: ai-cooling
+        name: Thermal Management
+        exposures: {VRT: [0.9, 1], MOD: [0.5, 1], NVT: [0.5, 1], FIX: [0.5, 2]}
+      - id: ai-electrical
+        name: Electrical Equipment
+        exposures: {ETN: [0.4, 1], HUBB: [0.3, 2], PWR: [0.4, 2], GEV: [0.4, 1]}
+      - id: ai-power-generation
+        name: Power Generation
+        exposures: {CEG: [0.5, 2], VST: [0.6, 2], NRG: [0.4, 2], GEV: [0.3, 2]}
+      - id: ai-datacenter-real-estate
+        name: Datacenter Real Estate
+        exposures: {EQIX: [0.6, 2], DLR: [0.7, 2]}
+      - id: ai-semicap
+        name: Semiconductor Equipment
+        exposures: {AMAT: [0.5, 2], LRCX: [0.5, 2], KLAC: [0.5, 2], TER: [0.4, 2]}
+      - id: ai-hyperscalers
+        name: Hyperscalers
+        exposures: {MSFT: [0.4, 1], GOOGL: [0.3, 1], AMZN: [0.3, 1], ORCL: [0.5, 1], META: [0.3, 1]}
+
+  - id: edge-ai
+    name: Edge AI
+    description: Inference workloads moving from centralized cloud to devices.
+    human_needs: [convenience, time, connection]
+    horizon_years: "3-7"
+    constraints:
+      - trend: Latency, privacy and cost push inference to the edge
+        constraint: Power-efficient silicon, on-device memory
+        solution: NPUs in phones/PCs/cars, low-power memory
+    related_etfs: [SMH]
+    exposures: {QCOM: [0.5, 1], AAPL: [0.3, 1], TXN: [0.2, 2], TSLA: [0.3, 2], AMD: [0.2, 1], MU: [0.2, 2]}
+
+  - id: ai-software-agents
+    name: AI Software & Agents
+    description: Software that performs work autonomously, monetised on outcomes.
+    human_needs: [productivity, time, money]
+    horizon_years: "2-5"
+    constraints:
+      - trend: LLM capability commoditises, distribution and data moats matter
+        constraint: Trust, integration into workflows, proprietary data
+        solution: Platforms owning the system of record and the data
+    related_etfs: [IGV]
+    exposures: {MSFT: [0.4, 1], NOW: [0.6, 1], CRM: [0.5, 1], PLTR: [0.9, 1], SNOW: [0.6, 1], DDOG: [0.5, 1], ADBE: [0.4, 1], INTU: [0.3, 1], APP: [0.7, 1], GOOGL: [0.3, 1], META: [0.3, 1]}
+
+  - id: cybersecurity
+    name: Cybersecurity
+    description: Rising attack surface from cloud, AI and geopolitics.
+    human_needs: [security]
+    horizon_years: "3-10"
+    constraints:
+      - trend: AI lowers the cost of attacks
+        constraint: Fragmented tools, talent shortage
+        solution: Platform consolidation, zero-trust, AI-driven SOC
+    related_etfs: [CIBR]
+    exposures: {PANW: [0.9, 1], CRWD: [0.9, 1], ZS: [0.9, 1], NET: [0.6, 1], FTNT: [0.9, 1], MSFT: [0.1, 2]}
+
+  - id: grid-modernization
+    name: Grid Modernization
+    description: Transmission, distribution and switchgear upgrades after decades of under-investment.
+    human_needs: [energy, security]
+    horizon_years: "5-15"
+    constraints:
+      - trend: Load growth from datacenters, EVs and reshoring
+        constraint: Transformer lead times, interconnection queues, skilled labour
+        solution: Electrical equipment, engineering & construction services, utility capex
+    related_etfs: [GRID, PAVE, XLU]
+    exposures: {ETN: [0.5, 1], GEV: [0.5, 1], PWR: [0.7, 1], HUBB: [0.7, 1], NVT: [0.4, 1], EMR: [0.3, 2], FIX: [0.4, 2], AEP: [0.3, 2], NEE: [0.3, 2]}
+
+  - id: power-demand
+    name: Electrification & Power Demand
+    description: First sustained US electricity demand growth in 20 years.
+    human_needs: [energy]
+    horizon_years: "5-15"
+    constraints:
+      - trend: Datacenters, EVs, heat pumps, industrial reshoring
+        constraint: Generation capacity, permitting
+        solution: Independent power producers, gas turbines, renewables + storage
+    related_etfs: [XLU, NLR]
+    exposures: {CEG: [0.7, 1], VST: [0.7, 1], NRG: [0.6, 1], NEE: [0.5, 1], SO: [0.4, 1], DUK: [0.4, 1], AEP: [0.4, 1], GEV: [0.5, 1], FSLR: [0.6, 1]}
+
+  - id: nuclear-power
+    name: Nuclear Renaissance
+    description: Restarts, uprates and SMRs as baseload for AI and decarbonisation.
+    human_needs: [energy, security]
+    horizon_years: "5-20"
+    constraints:
+      - trend: Hyperscalers sign long-term nuclear PPAs
+        constraint: Fuel supply, regulatory timelines, capital cost
+        solution: Existing fleet owners, component makers, fuel cycle
+    related_etfs: [NLR, URA]
+    exposures: {CEG: [0.5, 1], VST: [0.3, 1], BWXT: [0.8, 1], GEV: [0.2, 2]}
+
+  - id: robotics-automation
+    name: Robotics & Physical AI
+    description: Automation of physical labour, from factories to surgery.
+    human_needs: [productivity, time, health]
+    horizon_years: "5-15"
+    constraints:
+      - trend: Labour scarcity and AI-enabled perception
+        constraint: Actuators, sensors, safety certification
+        solution: Industrial automation, surgical robots, humanoid supply chain
+    related_etfs: [BOTZ]
+    exposures: {ISRG: [0.6, 1], TSLA: [0.3, 1], ROK: [0.8, 1], EMR: [0.4, 1], DE: [0.3, 2], TER: [0.4, 2], NVDA: [0.1, 2]}
+
+  - id: autonomous-transport
+    name: Autonomous Transport
+    description: Robotaxis and driver-assist reducing the cost of mobility.
+    human_needs: [mobility, convenience, time]
+    horizon_years: "3-10"
+    constraints:
+      - trend: Autonomy validated in commercial fleets
+        constraint: Regulation, sensor cost, edge compute
+        solution: Autonomy platforms, fleet operators, silicon
+    related_etfs: [ARKK]
+    exposures: {TSLA: [0.6, 1], GOOGL: [0.2, 1], UBER: [0.5, 2], NVDA: [0.1, 2], QCOM: [0.1, 2]}
+
+  - id: glp1-obesity
+    name: GLP-1 & Metabolic Health
+    description: Incretin drugs addressing obesity, diabetes and adjacent conditions.
+    human_needs: [health, status]
+    horizon_years: "3-10"
+    constraints:
+      - trend: Demand exceeds manufacturing capacity
+        constraint: Fill-finish capacity, reimbursement, oral formulations
+        solution: Manufacturers, CDMOs, supply chain
+    related_etfs: [XLV]
+    exposures: {LLY: [0.8, 1], PFE: [0.1, 1], AMGN: [0.2, 1], TMO: [0.1, 2]}
+
+  - id: longevity
+    name: Longevity & Healthspan
+    description: Diagnostics, devices and therapies extending healthy life.
+    human_needs: [health, time]
+    horizon_years: "5-20"
+    constraints:
+      - trend: Ageing populations, continuous monitoring
+        constraint: Reimbursement, clinical evidence
+        solution: Continuous sensors, minimally-invasive procedures, gene therapies
+    related_etfs: [IHI, XBI]
+    exposures: {LLY: [0.3, 1], ISRG: [0.2, 1], DXCM: [0.5, 1], REGN: [0.3, 1], VRTX: [0.3, 1], TMO: [0.2, 2], DHR: [0.2, 2], ABT: [0.2, 1]}
+
+  - id: medical-devices
+    name: Medical Device Innovation
+    description: Procedure growth and device upgrades across cardio, ortho and diabetes.
+    human_needs: [health]
+    horizon_years: "3-10"
+    related_etfs: [IHI]
+    exposures: {ISRG: [0.5, 1], DXCM: [0.5, 1], ABT: [0.4, 1], BSX: [0.7, 1], SYK: [0.7, 1], EW: [0.6, 1]}
+
+  - id: semicap
+    name: Semiconductor Capacity Build
+    description: Fab construction and node transitions driven by AI and sovereignty.
+    human_needs: [productivity, security]
+    horizon_years: "3-7"
+    related_etfs: [SMH]
+    exposures: {AMAT: [0.9, 1], LRCX: [0.9, 1], KLAC: [0.9, 1], TER: [0.6, 1]}
+
+  - id: reshoring-capex
+    name: Reshoring & Industrial Capex
+    description: Supply-chain re-localisation and mega-project construction in the US.
+    human_needs: [security, productivity]
+    horizon_years: "5-10"
+    constraints:
+      - trend: Policy incentives and tariff risk relocate manufacturing
+        constraint: Labour, permitting, electrical equipment
+        solution: Machinery, rental, mechanical/electrical contractors, steel
+    related_etfs: [PAVE, XLI]
+    exposures: {CAT: [0.4, 1], ETN: [0.3, 1], PH: [0.4, 1], URI: [0.6, 1], EMR: [0.3, 1], FIX: [0.4, 1], PWR: [0.3, 1], ROK: [0.4, 1], HON: [0.2, 2], NUE: [0.5, 1], DE: [0.2, 2], BLDR: [0.3, 2]}
+
+  - id: defense-modernization
+    name: Defense Modernization
+    description: Multi-year rearmament and munitions replenishment.
+    human_needs: [security]
+    horizon_years: "5-15"
+    related_etfs: [ITA]
+    exposures: {LMT: [0.9, 1], RTX: [0.7, 1], GD: [0.8, 1], NOC: [0.9, 1], LHX: [0.8, 1], AXON: [0.6, 1], RKLB: [0.6, 1], PLTR: [0.3, 1], HWM: [0.6, 2], GE: [0.3, 2]}
+
+  - id: space-economy
+    name: Space Economy
+    description: Falling launch costs unlock satellites, comms and defense in orbit.
+    human_needs: [connection, security, knowledge]
+    horizon_years: "5-20"
+    related_etfs: [ITA, ARKK]
+    exposures: {RKLB: [0.9, 1], LMT: [0.2, 1], RTX: [0.1, 2]}
+
+  - id: digital-payments
+    name: Digital Payments & Fintech
+    description: Cash-to-digital shift, embedded finance, stablecoin rails.
+    human_needs: [money, convenience]
+    horizon_years: "3-10"
+    related_etfs: [XLF]
+    exposures: {V: [0.9, 1], MA: [0.9, 1], AXP: [0.6, 1], PYPL: [0.9, 1], XYZ: [0.8, 1], HOOD: [0.6, 1], COIN: [0.3, 1], SOFI: [0.7, 1]}
+
+  - id: crypto-digital-assets
+    name: Crypto & Digital Assets
+    description: Institutional adoption of digital assets and tokenisation.
+    human_needs: [money, status]
+    horizon_years: "3-10"
+    related_etfs: [IAI]
+    exposures: {COIN: [0.9, 1], HOOD: [0.3, 1], BLK: [0.05, 2], IBKR: [0.1, 2]}
+
+  - id: cloud-computing
+    name: Cloud Computing
+    description: Ongoing migration of workloads and data to hyperscale platforms.
+    human_needs: [productivity]
+    horizon_years: "3-10"
+    related_etfs: [SKYY]
+    exposures: {MSFT: [0.5, 1], AMZN: [0.5, 1], GOOGL: [0.3, 1], ORCL: [0.6, 1], SNOW: [0.6, 1], DDOG: [0.6, 1], NET: [0.7, 1]}
+
+  - id: streaming-media
+    name: Streaming & Digital Entertainment
+    description: Attention shifting to on-demand video, games and creator platforms.
+    human_needs: [entertainment, connection]
+    horizon_years: "2-7"
+    related_etfs: [XLC]
+    exposures: {NFLX: [0.9, 1], DIS: [0.4, 1], RBLX: [0.7, 1], META: [0.2, 1], GOOGL: [0.2, 1]}
+
+  - id: ecommerce-logistics
+    name: E-commerce & Logistics
+    description: Online share gains and the logistics network that serves them.
+    human_needs: [convenience, time]
+    horizon_years: "3-10"
+    related_etfs: [IYT, XLRE]
+    exposures: {AMZN: [0.5, 1], UPS: [0.4, 2], FDX: [0.4, 2], UNP: [0.2, 2], PLD: [0.6, 2], WMT: [0.2, 1]}
+
+  - id: housing-shortage
+    name: Housing Undersupply
+    description: Structural shortage of US homes after a decade of under-building.
+    human_needs: [housing]
+    horizon_years: "5-15"
+    constraints:
+      - trend: Household formation exceeds completions
+        constraint: Rates, land, labour, lumber
+        solution: Homebuilders, building products, home improvement
+    related_etfs: [XHB]
+    exposures: {HD: [0.4, 2], LOW: [0.4, 2], DHI: [0.9, 1], LEN: [0.9, 1], TOL: [0.9, 1], PHM: [0.9, 1], SHW: [0.3, 2], BLDR: [0.8, 1]}
+
+  - id: travel-experiences
+    name: Travel & Experiences
+    description: Spending shift from goods to experiences.
+    human_needs: [entertainment, connection, status]
+    horizon_years: "2-7"
+    related_etfs: [XLY]
+    exposures: {BKNG: [0.8, 1], MAR: [0.7, 1], ABNB: [0.8, 1], DAL: [0.7, 1], RCL: [0.9, 1], DIS: [0.3, 1], UBER: [0.3, 2]}
+
+  - id: gold-hard-assets
+    name: Gold & Hard Assets
+    description: Central-bank buying and fiscal deficits support monetary metals.
+    human_needs: [security, money]
+    horizon_years: "2-10"
+    related_etfs: [GLD, XME]
+    exposures: {NEM: [0.9, 1], FCX: [0.3, 1], SCCO: [0.2, 2]}
+
+  - id: copper-electrification
+    name: Copper & Transition Metals
+    description: Grid, EV and datacenter build-out is copper-intensive while mine supply lags.
+    human_needs: [energy]
+    horizon_years: "5-15"
+    related_etfs: [CPER, XME]
+    exposures: {FCX: [0.8, 1], SCCO: [0.8, 1], NUE: [0.2, 2]}
+
+  - id: lng-energy-security
+    name: LNG & Energy Security
+    description: US gas exports and midstream as geopolitics reshapes energy trade.
+    human_needs: [energy, security]
+    horizon_years: "3-10"
+    related_etfs: [XOP, XLE]
+    exposures: {XOM: [0.3, 1], CVX: [0.2, 1], COP: [0.3, 1], EOG: [0.3, 1], OXY: [0.3, 1], SLB: [0.4, 2], LNG: [0.9, 1], EQT: [0.6, 1], KMI: [0.5, 1], WMB: [0.5, 1], BKR: [0.5, 2]}
+
+  - id: value-retail
+    name: Value Retail & Consumer Bifurcation
+    description: Squeezed households trade down; scale retailers take share.
+    human_needs: [money, food, convenience]
+    horizon_years: "1-5"
+    related_etfs: [XLP]
+    exposures: {WMT: [0.5, 1], COST: [0.6, 1], TJX: [0.7, 1], TSCO: [0.3, 1], AMZN: [0.2, 1]}
+
+  - id: market-structure
+    name: Wealth Management & Market Structure
+    description: Retail participation, retirement flows and exchange volumes.
+    human_needs: [money, status]
+    horizon_years: "3-10"
+    related_etfs: [IAI]
+    exposures: {SCHW: [0.6, 1], MS: [0.4, 1], GS: [0.4, 1], BLK: [0.6, 1], HOOD: [0.4, 1], IBKR: [0.7, 1], CME: [0.6, 1], ICE: [0.5, 1], SPGI: [0.5, 2]}
+
+  - id: advertising-attention
+    name: Advertising & Attention Platforms
+    description: Ad dollars follow attention and AI-driven targeting.
+    human_needs: [entertainment, connection]
+    horizon_years: "2-7"
+    related_etfs: [XLC]
+    exposures: {META: [0.7, 1], GOOGL: [0.6, 1], TTD: [0.9, 1], APP: [0.5, 1], NFLX: [0.1, 2], AMZN: [0.1, 2], RDDT: [0.8, 1]}

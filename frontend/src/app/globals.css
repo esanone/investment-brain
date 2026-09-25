@@ -1,0 +1,203 @@
+@import "tailwindcss";
+
+/*
+ * Quiet research-terminal palette. Neutral greys, one accent, and green/red
+ * reserved for signed values only. Tabular numerals everywhere so columns line up.
+ */
+:root {
+  --bg: #f7f7f5;
+  --surface: #ffffff;
+  --surface-2: #f1f1ee;
+  --surface-3: #e9e9e5;
+  --border: #e4e3df;
+  --border-strong: #cfcdc7;
+  --text: #1a1917;
+  --text-muted: #6f6c66;
+  --text-subtle: #a3a09a;
+  --accent: #2563eb;
+  --accent-soft: #e8efff;
+  --pos: #15803d;
+  --pos-soft: #e6f4ea;
+  --neg: #b91c1c;
+  --neg-soft: #fbe9e9;
+  --warn: #b45309;
+  --warn-soft: #fdf1df;
+  --meter-track: #e4e3df;
+  --meter-fill: #57534e;
+  --regime-goldilocks: #2f9e6e;
+  --regime-reflation: #d19a2b;
+  --regime-stagflation: #c65a3c;
+  --regime-contraction: #5b7fb5;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #141416;
+    --surface: #1b1b1e;
+    --surface-2: #222226;
+    --surface-3: #2a2a2f;
+    --border: #2c2c31;
+    --border-strong: #3f3f46;
+    --text: #ececea;
+    --text-muted: #a3a19c;
+    --text-subtle: #6f6d69;
+    --accent: #7ea2ff;
+    --accent-soft: #1f2a45;
+    --pos: #4ade80;
+    --pos-soft: #10291f;
+    --neg: #f87171;
+    --neg-soft: #3a2020;
+    --warn: #fbbf24;
+    --warn-soft: #392a12;
+    --meter-track: #2c2c31;
+    --meter-fill: #a8a29e;
+    --regime-goldilocks: #3fbf87;
+    --regime-reflation: #e0ad45;
+    --regime-stagflation: #e07152;
+    --regime-contraction: #7b9dd6;
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+  --color-ink: var(--text);
+  --color-muted: var(--text-muted);
+  --color-subtle: var(--text-subtle);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-pos: var(--pos);
+  --color-pos-soft: var(--pos-soft);
+  --color-neg: var(--neg);
+  --color-neg-soft: var(--neg-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.45;
+  font-family:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "cv11" 1;
+  -webkit-font-smoothing: antialiased;
+}
+
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+input,
+select,
+textarea,
+button {
+  font: inherit;
+  color: inherit;
+}
+
+/* Compact data tables ------------------------------------------------------ */
+.tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.tbl th {
+  text-align: left;
+  font-weight: 500;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-strong);
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+.tbl td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.tbl tbody tr:last-child td {
+  border-bottom: none;
+}
+.tbl tbody tr:hover td {
+  background: var(--surface-2);
+}
+.tbl .num,
+.tbl th.num {
+  text-align: right;
+}
+.tbl .dim td {
+  color: var(--text-subtle);
+}
+.tbl a {
+  color: inherit;
+}
+.tbl a:hover {
+  color: var(--accent);
+}
+.tbl th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+.tbl th.sortable:hover {
+  color: var(--text);
+}
+.tbl th.sorted {
+  color: var(--text);
+}
+
+.tbl-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Small labels ------------------------------------------------------------ */
+.eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 12.5px;
+}
+
+.chip {
+  display: inline-block;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

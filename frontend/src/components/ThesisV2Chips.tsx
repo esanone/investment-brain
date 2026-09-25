@@ -105,7 +105,7 @@ export function ThesisRefChip({ id, contribution }: { id: string; contribution?:
   const neg = contribution !== null && contribution !== undefined && contribution < 0;
   const title = contribution === undefined ? id : `${id} · contribution ${signed(contribution, 2)} (posterior × value-pool weight)`;
   return (
-    <Link href={`/thesis-v2/${id}`} className={`chip mono hover:text-accent ${neg ? "border-neg bg-neg-soft text-neg" : ""}`} title={title}>
+    <Link href={`/thesis-v2/${id}`} className={`chip mono whitespace-nowrap hover:text-accent ${neg ? "border-neg bg-neg-soft text-neg" : ""}`} title={title}>
       {id}
     </Link>
   );

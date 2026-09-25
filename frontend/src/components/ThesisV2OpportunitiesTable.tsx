@@ -90,7 +90,7 @@ export function ThesisV2OpportunitiesTable({ rows, meta }: { rows: ThesisV2Candi
                     )}
                   </td>
                   <td>
-                    <div className="flex max-w-48 flex-wrap gap-1 whitespace-normal">
+                    <div className="flex min-w-44 max-w-64 flex-wrap gap-1 whitespace-normal">
                       {r.theses?.length ? r.theses.map((x) => <ThesisRefChip key={x.thesis_id} id={x.thesis_id} contribution={x.contribution} />) : <span className="text-muted">—</span>}
                     </div>
                   </td>

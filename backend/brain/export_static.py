@@ -43,6 +43,7 @@ def export(out: Path) -> dict:
     for ep in ("health", "overview", "regime", "flows", "risk", "runs", "themes", "companies", "portfolio", "portfolio/history",
                "brief", "brief/history", "attention", "thesis", "thesis/history", "thesis-v2"):
         get(f"/api/{ep}", f"api/{ep}.json")
+    get("/api/thesis-v2/opportunities", "api/thesis-v2/opportunities.json")
     t2 = c.get("/api/thesis-v2").json() if c.get("/api/thesis-v2").status_code == 200 else {"theses": []}
     for t in t2.get("theses", []):
         get(f"/api/thesis-v2/{t['id']}", f"api/thesis-v2/{t['id']}.json")

@@ -264,3 +264,107 @@ def summary(record: dict) -> dict:
             "next_confirmation_signal": record.get("indicators", {}).get("next_confirmation_signal"),
             "n_analogues": len(record.get("analogues", [])), "n_evidence": p.get("n_evidence"), "n_updates": len(record.get("updates", [])),
             "outcome": record.get("outcome"), "brier": record.get("brier")}
+
+
+# ------------------------------------------------------------------ from the briefs' long-term bullets to theses to stocks
+CLUSTER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "theses": {"type": "array", "items": {"type": "object", "properties": {
+            "title": {"type": "string"},
+            "statement": {"type": "string", "description": "Measurable thesis: population, behaviour, horizon year, observable outcome."},
+            "source_bullets": {"type": "array", "items": {"type": "integer"}, "description": "Indexes of the bullets this thesis consolidates."},
+            "existing_id": {"type": "string", "description": "If an existing ledger thesis already covers this, its id; else empty string."}},
+            "required": ["title", "statement", "source_bullets", "existing_id"], "additionalProperties": False}},
+    },
+    "required": ["theses"], "additionalProperties": False,
+}
+CLUSTER_SYSTEM = (
+    "You consolidate daily long-term human-behaviour observations into distinct, non-overlapping theses for a probabilistic ledger. "
+    "Merge bullets that describe the same structural shift (same human need, same mechanism) into ONE thesis; keep genuinely different "
+    "shifts separate. Aim for 5-9 theses. Write each as a measurable statement (population, behaviour, horizon year, observable outcome). "
+    "If an existing ledger thesis already covers a cluster, reference its id instead of creating a duplicate. No disclaimers. "
+    "Return only the JSON object requested.")
+
+BECOMES_WEIGHT = {"mandatory_infrastructure": 1.0, "gains_pricing_power": 0.9, "scarce": 0.9, "abundant": -0.3, "new_risk": -0.6, "loses_pricing_power": -1.0}
+
+MEMO_SCHEMA = {
+    "type": "object",
+    "properties": {"picks": {"type": "array", "items": {"type": "object", "properties": {
+        "ticker": {"type": "string"}, "why": {"type": "string", "description": "2-3 sentences: which theses, which value pool, why the market is not paying for it yet."},
+        "entry_condition": {"type": "string"}, "key_risk": {"type": "string"}},
+        "required": ["ticker", "why", "entry_condition", "key_risk"], "additionalProperties": False}},
+        "portfolio_note": {"type": "string", "description": "One paragraph: how these fit together, concentrations, what would change the list."}},
+    "required": ["picks", "portfolio_note"], "additionalProperties": False,
+}
+MEMO_SYSTEM = (
+    "You are the Economic Intelligence of the Causal Futures Engine. You receive the ranked stock candidates that the theses' value pools "
+    "point to, with each name's thesis exposures (posterior-weighted), current fundamental/expectation scores, technical readiness and "
+    "attention flags. For the top candidates, write a candid rationale grounded ONLY in that data, an entry condition, and the key risk. "
+    "No disclaimers. Return only the JSON object requested.")
+
+
+def cluster_bullets(bullets: list[dict], existing: list[dict]) -> list[dict]:
+    pkg = {"bullets": [{"i": i, "date": b["date"], "text": b["text"]} for i, b in enumerate(bullets)],
+           "existing_theses": [{"id": e["id"], "title": e.get("title"), "statement": e.get("formalized", {}).get("statement")} for e in existing]}
+    out = _call(CLUSTER_SYSTEM, pkg, CLUSTER_SCHEMA, "thesis_v2_cluster")
+    if not out:
+        raise RuntimeError("LLM clustering unavailable")
+    res = []
+    for t in out.get("theses", []):
+        src = [bullets[i] for i in t.get("source_bullets", []) if 0 <= i < len(bullets)]
+        res.append({"title": t["title"], "statement": t["statement"], "existing_id": (t.get("existing_id") or "").strip() or None, "source_bullets": src})
+    return res
+
+
+def opportunities(records: list[dict], company_rows: dict[str, dict], technicals: dict[str, dict], attention: dict[str, dict]) -> dict:
+    """Rank universe stocks by posterior-weighted exposure to the theses' value pools, then apply the book's entry discipline."""
+    exposure: dict[str, dict] = {}
+    for rec in records:
+        if rec.get("status") != "open":
+            continue
+        p = (rec.get("probability", {}).get("posterior") or 50) / 100
+        for vp in rec.get("value_pools", []):
+            w = BECOMES_WEIGHT.get(vp.get("becomes"), 0.5)
+            for t in vp.get("tickers", []):
+                x = exposure.setdefault(t, {"score": 0.0, "theses": {}, "roles": []})
+                x["score"] += p * w
+                x["theses"][rec["id"]] = x["theses"].get(rec["id"], 0.0) + p * w
+                x["roles"].append({"thesis_id": rec["id"], "layer": vp["layer"], "becomes": vp["becomes"], "posterior": rec["probability"]["posterior"]})
+    rows = []
+    for t, x in exposure.items():
+        c = company_rows.get(t)
+        if not c:
+            continue
+        ta = technicals.get(t) or {}
+        ac = attention.get(t) or {}
+        opp, gap = c.get("total") or 50, c.get("expectations_gap") or 0
+        tech_score = ta.get("score")
+        tech_factor = 1.0 if ta.get("ready") else 0.75 if (tech_score or 0) >= 50 else 0.5 if tech_score is not None else 0.8
+        att_factor = 1.15 if ac.get("not_priced") else 0.8 if ac.get("crowded") else 1.0
+        thesis_exposure = max(x["score"], 0.0)
+        final = thesis_exposure * (0.5 + opp / 100) * (1 + max(gap, 0) / 100) * tech_factor * att_factor
+        headwind = sum(v for v in x["theses"].values() if v < 0)
+        rows.append({
+            "ticker": t, "name": c.get("name"), "sector": c.get("sector"),
+            "thesis_exposure": r(thesis_exposure, 2), "headwind": r(headwind, 2), "score": r(final, 2),
+            "theses": sorted(({"thesis_id": k, "contribution": r(v, 2)} for k, v in x["theses"].items()), key=lambda z: -z["contribution"]),
+            "roles": x["roles"][:6],
+            "opportunity": opp, "expectations_gap": gap, "pricing": c.get("pricing"), "reality": c.get("reality"), "narrative": c.get("narrative"),
+            "technical_score": tech_score, "technical_stage": ta.get("stage"), "technical_ready": bool(ta.get("ready")),
+            "attention": ac.get("attention"), "attention_not_priced": bool(ac.get("not_priced")), "crowded": bool(ac.get("crowded")),
+            "buy_readiness": ("ready" if ta.get("ready") and opp >= 55 and gap >= 0 else "watch" if (tech_score or 0) >= 50 or opp >= 55 else "not yet"),
+        })
+    rows.sort(key=lambda z: -z["score"])
+    losers = sorted([z for z in rows if z["headwind"] < -0.3], key=lambda z: z["headwind"])[:12]
+    return {"as_of": date.today().isoformat(), "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "n_theses": sum(1 for rc in records if rc.get("status") == "open"), "candidates": rows[:40], "losers": losers,
+            "method": "Thesis exposure = sum over open theses of posterior x value-pool weight (mandatory infrastructure 1.0, pricing power / scarce 0.9, "
+                      "abundant -0.3, new risk -0.6, loses pricing power -1.0). Final = exposure x (0.5 + opportunity/100) x (1 + gap/100) x technical "
+                      "readiness (trend template) x attention (not-priced +15%, crowded -20%). 'ready' = passes the book's entry gate today."}
+
+
+def opportunity_memo(top: list[dict], theses: list[dict]) -> Optional[dict]:
+    pkg = {"candidates": top, "theses": [{"id": t["id"], "title": t.get("title"), "posterior": t.get("probability", {}).get("posterior"),
+                                          "next_signal": t.get("indicators", {}).get("next_confirmation_signal")} for t in theses]}
+    return _call(MEMO_SYSTEM, pkg, MEMO_SCHEMA, "thesis_v2_memo")

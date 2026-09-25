@@ -298,6 +298,78 @@ def run_thesis_v2_update(thesis_id: Optional[str] = None, force: bool = False) -
     return out
 
 
+def run_thesis_v2_from_briefs(max_new: int = 8, workers: int = 3) -> dict:
+    """Consolidate every brief's long-term human-behaviour bullets into theses, analyse each, then rank stocks."""
+    from concurrent.futures import ThreadPoolExecutor
+    from .engines import causal
+    from .engines.themes import load_graph
+    init_db()
+    bullets = []
+    for b in sorted(load_briefs(60), key=lambda x: x.get("as_of", "")):
+        for text in (b.get("llm") or {}).get("human_behavior", {}).get("long_term", []):
+            bullets.append({"date": b["as_of"], "text": text})
+    existing = list(_thesis_v2_records().values())
+    log(f"thesis-v2: consolidating {len(bullets)} long-term bullets from {len({b['date'] for b in bullets})} briefs ({len(existing)} theses on the ledger)")
+    clusters = causal.cluster_bullets(bullets, existing)
+    ex_by_id = {e["id"]: e for e in existing}
+    for c in clusters:
+        if c["existing_id"] and c["existing_id"] in ex_by_id:
+            rec = ex_by_id[c["existing_id"]]
+            rec.setdefault("source_bullets", [])
+            known = {x["text"] for x in rec["source_bullets"]}
+            rec["source_bullets"] += [x for x in c["source_bullets"] if x["text"] not in known]
+            _save_thesis_v2(rec)
+    new = [c for c in clusters if not c["existing_id"]][:max_new]
+    log(f"thesis-v2: {len(clusters)} clusters -> {len(new)} new theses to analyse: " + "; ".join(c["title"][:40] for c in new))
+    with session_scope() as s:
+        universe = [{"ticker": c.ticker, "name": c.name, "sector": c.sector, "industry": c.industry} for c in s.execute(select(Company)).scalars()]
+    themes = [n["name"] for n in load_graph()]
+    ctx = _thesis_v2_context()
+    next_n = len(existing) + 1
+
+    def analyse(i_c):
+        i, c = i_c
+        tid = f"T-{next_n + i:03d}"
+        try:
+            rec = causal.create(tid, c["statement"], universe, themes, ctx)
+            rec["source_bullets"], rec["origin"] = c["source_bullets"], "briefs"
+            return rec
+        except Exception as e:
+            log(f"thesis-v2: {tid} failed: {e}")
+            return None
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for rec in pool.map(analyse, list(enumerate(new))):
+            if rec:
+                _save_thesis_v2(rec)
+                log(f"thesis-v2: {rec['id']} '{rec['title'][:60]}' prior {rec['probability']['prior']}% -> posterior {rec['probability']['posterior']}%")
+    return run_thesis_v2_opportunities()
+
+
+def run_thesis_v2_opportunities(use_llm: bool = True) -> dict:
+    """Rank stocks by posterior-weighted value-pool exposure across all open theses, filtered by entry discipline."""
+    from .engines import causal
+    init_db()
+    records = list(_thesis_v2_records().values())
+    with session_scope() as s:
+        rid = _latest_run_id(s)
+        comps = [x.payload for x in s.execute(select(Snapshot).where(Snapshot.run_id == rid, Snapshot.kind == "company")).scalars()] if rid else []
+    rows = {p["company"]["ticker"]: {"name": p["company"]["name"], "sector": p["company"]["sector"], "total": p["strategist"]["opportunity_score"],
+                                     "expectations_gap": p["strategist"]["expectations_gap"], "pricing": p["strategist"]["pricing"],
+                                     "reality": p["strategist"]["reality"], "narrative": p["strategist"]["narrative"]} for p in comps}
+    technicals = {p["company"]["ticker"]: p.get("technical") for p in comps if p.get("technical")}
+    att = {c["ticker"]: c for c in (load_prior("attention") or {}).get("companies", [])}
+    out = causal.opportunities(records, rows, technicals, att)
+    if use_llm and out["candidates"]:
+        memo = causal.opportunity_memo(out["candidates"][:15], records)
+        if memo:
+            out["memo"] = memo
+    with session_scope() as s:
+        s.add(Snapshot(run_id=f"t2o-{datetime.now().strftime('%Y%m%d-%H%M%S')}", kind="thesis_v2_opportunities", key="", as_of=date.today(), payload=out))
+    log("thesis-v2: opportunities -> " + ", ".join(f"{c['ticker']} {c['score']} ({c['buy_readiness']})" for c in out["candidates"][:10]))
+    return out
+
+
 def run_thesis_v2_resolve(thesis_id: str, outcome: bool) -> dict:
     from .engines import causal
     rec = _thesis_v2_records().get(thesis_id)
@@ -486,6 +558,8 @@ def main() -> None:
     ap.add_argument("--update", type=str, default=None, help="thesis-v2: id to review, or 'all'")
     ap.add_argument("--resolve", type=str, default=None, help="thesis-v2: 'T-001:true|false'")
     ap.add_argument("--seed", action="store_true", help="thesis-v2: create T-001 (trusted delegation)")
+    ap.add_argument("--from-briefs", action="store_true", help="thesis-v2: consolidate the briefs' long-term bullets into theses, analyse, rank stocks")
+    ap.add_argument("--opportunities", action="store_true", help="thesis-v2: re-rank stocks from the current ledger")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--skip-ingest", action="store_true")
     ap.add_argument("--no-llm", action="store_true")
@@ -498,7 +572,11 @@ def main() -> None:
         run_longterm(use_llm=not a.no_llm)
         return
     if a.cmd == "thesis-v2":
-        if a.seed:
+        if a.from_briefs:
+            run_thesis_v2_from_briefs()
+        elif a.opportunities:
+            run_thesis_v2_opportunities(use_llm=not a.no_llm)
+        elif a.seed:
             run_thesis_v2_new(T001, "T-001")
         elif a.new:
             run_thesis_v2_new(a.new)
@@ -523,7 +601,9 @@ def main() -> None:
             log(f"longterm: failed ({e}); continuing with the previous thesis")
         if not a.no_llm:
             try:
-                run_thesis_v2_update()          # only theses not yet reviewed this calendar month
+                reviewed = run_thesis_v2_update()          # only theses not yet reviewed this calendar month
+                if reviewed:
+                    run_thesis_v2_opportunities()
             except Exception as e:
                 log(f"thesis-v2: monthly review failed ({e}); continuing")
         run(a.limit, a.skip_ingest, not a.no_llm)

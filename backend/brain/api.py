@@ -275,6 +275,25 @@ def thesis_v2_list() -> dict:
     return {"theses": [summary(x) for x in recs], "scoreboard": scoreboard(recs)}
 
 
+@app.get("/api/thesis-v2/opportunities")
+def thesis_v2_opportunities() -> dict:
+    from .pipeline import load_prior
+    o = load_prior("thesis_v2_opportunities")
+    if not o:
+        raise HTTPException(404, "No opportunity ranking yet. Run: python -m brain.pipeline thesis-v2 --from-briefs")
+    return o
+
+
+@app.post("/api/thesis-v2/analyze-briefs")
+def thesis_v2_from_briefs(background: BackgroundTasks) -> dict:
+    from .pipeline import run_thesis_v2_from_briefs
+    j = _bg("running_thesis_v2", run_thesis_v2_from_briefs)
+    if "job" not in j:
+        return j
+    background.add_task(j["job"])
+    return {"started": True}
+
+
 @app.get("/api/thesis-v2/{thesis_id}")
 def thesis_v2_get(thesis_id: str) -> dict:
     from .pipeline import _thesis_v2_records

@@ -152,7 +152,7 @@ from our own daily observations and start contributing after three weeks.
 `python -m brain.pipeline morning` runs, in order: **attention** (what the public is searching, watching, installing)
 → **brief** (news → claims, market thesis, human-behaviour shifts, theme/ticker signals) → **long-term thesis**
 (every brief's long-term observations reconciled into one thesis and a theme conviction ranking) → **recalibration**
-(data refresh, all engines, portfolio v2). It takes ~30 minutes and about $4 of API usage.
+(data refresh, all engines, portfolio v2). It takes ~30 minutes. Model tiers: Opus 5 for the brief, long-term thesis, Thesis v2 and the memo; Sonnet 5 for the per-company enrichment (set `ANTHROPIC_BULK_MODEL` to change).
 
 Install the weekday 06:15 schedule as a macOS LaunchAgent:
 

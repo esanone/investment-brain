@@ -472,7 +472,8 @@ def compute_all(frames: dict, as_of: date, use_llm: bool, llm_top_n: Optional[in
     if use_llm and llm_provider():
         holdings = [h["ticker"] for h in portfolio["holdings"]]
         targets = list(dict.fromkeys(holdings + [x["ticker"] for x in ranked[:llm_top_n]]))
-        log(f"llm: enriching {len(targets)} theses via {llm_provider()} ({settings.anthropic_model if llm_provider() == 'anthropic' else settings.openai_model})")
+        log(f"llm: enriching {len(targets)} theses via {llm_provider()} ({settings.anthropic_bulk_model if llm_provider() == 'anthropic' else settings.openai_model}; "
+            f"brief/thesis/memo stay on {settings.anthropic_model})")
         from concurrent.futures import ThreadPoolExecutor
         from .engines.technicals import technical_read
 

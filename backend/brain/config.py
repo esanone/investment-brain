@@ -29,7 +29,8 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = None
     openai_model: str = "gpt-4o-2024-08-06"
     anthropic_api_key: Optional[str] = None
-    anthropic_model: str = "claude-opus-5"
+    anthropic_model: str = "claude-opus-5"          # reasoning tier: brief, long-term thesis, Thesis v2, portfolio memo
+    anthropic_bulk_model: str = "claude-sonnet-5"   # bulk tier: per-company thesis enrichment (20-27 calls per recalibration)
 
     # Pipeline knobs
     universe_limit: Optional[int] = None      # cap number of companies (fast dev runs)

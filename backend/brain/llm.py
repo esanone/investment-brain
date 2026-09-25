@@ -85,16 +85,16 @@ def provider() -> Optional[str]:
     return None
 
 
-def _anthropic_json(system: str, user: str, schema: dict) -> Optional[dict]:
+def _anthropic_json(system: str, user: str, schema: dict, model: Optional[str] = None) -> Optional[dict]:
     from anthropic import Anthropic
     client = Anthropic(api_key=settings.anthropic_api_key)
-    # Thinking tokens count against max_tokens on Opus 5, so give long structured outputs plenty of room (streaming avoids timeouts).
-    with client.beta.messages.stream(
-        model=settings.anthropic_model, max_tokens=64000, system=system,
-        messages=[{"role": "user", "content": user}],
-        output_config={"format": {"type": "json_schema", "schema": schema}},
-        betas=["server-side-fallback-2026-07-01"], fallbacks="default",
-    ) as stream:
+    model = model or settings.anthropic_model
+    # Thinking tokens count against max_tokens, so give long structured outputs plenty of room (streaming avoids timeouts).
+    kwargs = dict(model=model, max_tokens=64000, system=system, messages=[{"role": "user", "content": user}],
+                  output_config={"format": {"type": "json_schema", "schema": schema}})
+    if model.startswith(("claude-opus-5", "claude-fable")):
+        kwargs.update(betas=["server-side-fallback-2026-07-01"], fallbacks="default")   # server-side refusal fallbacks (Opus 5 / Fable)
+    with client.beta.messages.stream(**kwargs) as stream:
         resp = stream.get_final_message()
     if resp.stop_reason == "refusal":
         print("[llm] request refused")
@@ -117,14 +117,20 @@ def _openai_json(system: str, user: str, schema: dict, name: str) -> Optional[di
     return json.loads(resp.choices[0].message.content)
 
 
-def _call(system: str, package: Any, schema: dict, name: str) -> Optional[dict]:
+def _call(system: str, package: Any, schema: dict, name: str, tier: str = "reasoning") -> Optional[dict]:
+    """tier: 'reasoning' (Opus 5) for the brief, long-term thesis, Thesis v2 and the memo; 'bulk' (Sonnet 5) for
+    the many per-company enrichments, which are structured summaries of evidence the engines already computed."""
     prov = provider()
     if not prov:
         return None
     user = "EVIDENCE (JSON):\n" + json.dumps(package, default=str)[:60000]
     try:
         if prov == "anthropic":
-            return _anthropic_json(system, user, schema)
+            model = settings.anthropic_bulk_model if tier == "bulk" else settings.anthropic_model
+            out = _anthropic_json(system, user, schema, model)
+            if isinstance(out, dict):
+                out["_model"] = model
+            return out
         return _openai_json(system, user, schema, name)
     except Exception as e:  # never let enrichment break the pipeline
         print(f"[llm] {name} failed: {e}")
@@ -132,7 +138,7 @@ def _call(system: str, package: Any, schema: dict, name: str) -> Optional[dict]:
 
 
 def enrich_thesis(package: dict) -> Optional[dict]:
-    return _call(THESIS_SYSTEM, package, THESIS_SCHEMA, "thesis")
+    return _call(THESIS_SYSTEM, package, THESIS_SCHEMA, "thesis", tier="bulk")
 
 
 def portfolio_memo(package: dict) -> Optional[dict]:

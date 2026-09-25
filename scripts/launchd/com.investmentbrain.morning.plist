@@ -6,7 +6,7 @@
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
-    <string>/Users/eduardosanchez/Desktop/Claude Code Test/investment-brain/scripts/morning.sh</string>
+    <string>/Users/eduardosanchez/Projects/investment-brain/scripts/morning.sh</string>
   </array>
   <!-- Weekdays at 06:15 local time: attention -> brief -> long-term thesis -> recalibration (~30 min), ready before the 09:30 ET open -->
   <key>StartCalendarInterval</key>
@@ -17,8 +17,8 @@
     <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>6</integer><key>Minute</key><integer>15</integer></dict>
     <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>6</integer><key>Minute</key><integer>15</integer></dict>
   </array>
-  <key>StandardOutPath</key><string>/Users/eduardosanchez/Desktop/Claude Code Test/investment-brain/backend/data/morning.log</string>
-  <key>StandardErrorPath</key><string>/Users/eduardosanchez/Desktop/Claude Code Test/investment-brain/backend/data/morning.log</string>
+  <key>StandardOutPath</key><string>/Users/eduardosanchez/Projects/investment-brain/backend/data/morning.log</string>
+  <key>StandardErrorPath</key><string>/Users/eduardosanchez/Projects/investment-brain/backend/data/morning.log</string>
   <key>RunAtLoad</key><false/>
 </dict>
 </plist>

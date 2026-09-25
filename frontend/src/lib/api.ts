@@ -20,6 +20,8 @@ import type {
   ThemeListRow,
   Thesis,
   ThesisHistoryRow,
+  ThesisV2,
+  ThesisV2List,
 } from "./types";
 import { IS_STATIC, staticFileFor } from "./static";
 
@@ -148,6 +150,25 @@ export const api = {
   thesis: () => get<Thesis>("/api/thesis"),
   /** Per-build thesis summaries, newest first (empty list until one has been built). */
   thesisHistory: () => get<ThesisHistoryRow[]>("/api/thesis/history"),
+  /** Thesis v2 ledger + scoreboard (Causal Futures Engine). `theses` is empty until one has been analysed. */
+  thesisV2List: () => get<ThesisV2List>("/api/thesis-v2"),
+  /** One Thesis v2 record. 404s with "No thesis {id}" until it has been analysed. */
+  thesisV2: (id: string) => get<ThesisV2>(`/api/thesis-v2/${encodeURIComponent(id.toUpperCase())}`),
+  /** Analyse a new thesis statement in the background (3-5 min); poll /api/health `running_thesis_v2` until false. 422 = statement too short. */
+  createThesisV2: (statement: string) =>
+    post<{ started: boolean; reason?: string }>("/api/thesis-v2", {
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ statement }),
+    }),
+  /** Monthly "what changed?" review of one thesis in the background; poll /api/health `running_thesis_v2` until false. */
+  updateThesisV2: (id: string) =>
+    post<{ started: boolean; reason?: string }>(`/api/thesis-v2/${encodeURIComponent(id.toUpperCase())}/update`),
+  /** Resolve a thesis (synchronous): freezes the record and Brier-scores it. Returns the updated record. */
+  resolveThesisV2: (id: string, outcome: boolean) =>
+    post<ThesisV2>(`/api/thesis-v2/${encodeURIComponent(id.toUpperCase())}/resolve`, {
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ outcome }),
+    }),
 };
 
 /** Latest model-portfolio snapshot. 404s with "No portfolio snapshot yet" until the pipeline has run. */

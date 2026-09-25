@@ -155,3 +155,38 @@ export const ATTENTION_SOURCE_LABELS: Record<string, string> = {
   github: "GitHub",
   autocomplete: "Autocomplete",
 };
+
+/** Human labels for the Thesis v2 causal-mechanism fields (causal.py ANALYZE_A_SCHEMA `mechanism`). */
+export const MECHANISM_LABELS: Record<string, string> = {
+  human_motivation: "Human motivation",
+  friction_removed: "Friction removed",
+  enabling_technology: "Enabling technology",
+  economic_incentive: "Economic incentive",
+  trust_requirement: "Trust requirement",
+  distribution_mechanism: "Distribution mechanism",
+  network_effects: "Network effects",
+  switching_costs: "Switching costs",
+  regulatory_constraints: "Regulatory constraints",
+};
+
+/** Human labels for the Thesis v2 analogue-similarity dimensions (causal.py SIM_DIMS). */
+export const SIM_DIM_LABELS: Record<string, string> = {
+  motivation: "Motivation",
+  friction_removed: "Friction removed",
+  behavior_change_required: "Behaviour change required",
+  trust_dependency: "Trust dependency",
+  infrastructure_dependency: "Infrastructure dependency",
+  network_effects: "Network effects",
+  economic_incentive: "Economic incentive",
+  adoption_demographics: "Adoption demographics",
+};
+
+/** Human labels for the Thesis v2 value-pool `becomes` field. */
+export const BECOMES_LABELS: Record<string, string> = {
+  scarce: "becomes scarce",
+  abundant: "becomes abundant",
+  mandatory_infrastructure: "mandatory infrastructure",
+  new_risk: "new risk",
+  loses_pricing_power: "loses pricing power",
+  gains_pricing_power: "gains pricing power",
+};

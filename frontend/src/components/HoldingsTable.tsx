@@ -85,7 +85,7 @@ export function RulesTable({ rules, evaluated }: { rules: EntryRule[]; evaluated
   );
 }
 
-const COLS = 24;
+const COLS = 25;
 
 /** Holdings table with expandable rows showing each position's frozen entry rules. */
 export function HoldingsTable({ rows }: { rows: Holding[] }) {
@@ -120,6 +120,7 @@ export function HoldingsTable({ rows }: { rows: Holding[] }) {
             <th className="num">Entry</th>
             <th className="num">Last</th>
             <th className="num">P&amp;L %</th>
+            <th className="num" title="Calendar days held · ✓ = eligible for long-term capital-gains treatment">Held</th>
             <th className="num">Stop</th>
             <th className="num">Trail</th>
             <th className="num" title="Trend-template score (0-100)">Tech</th>
@@ -215,6 +216,14 @@ function HoldingRow({
         <td className="num">{price(h.price)}</td>
         <td className="num font-medium"><Pnl v={h.pnl_pct} /></td>
         <td className="num">
+          {num(h.held_days, 0)}
+          {h.long_term_gain_eligible && (
+            <span className="ml-1 text-pos" title="Long-term capital-gains eligible">
+              ✓
+            </span>
+          )}
+        </td>
+        <td className="num">
           {price(stops?.active_stop)}
           {stops?.stop_distance_pct !== null && stops?.stop_distance_pct !== undefined && (
             <span className="ml-1 text-[11px] text-subtle">({pts(stops.stop_distance_pct, 1)})</span>
@@ -268,7 +277,30 @@ function HoldingRow({
                   growth {num(h.growth, 0)} · value {num(h.value, 0)} · macro fit {num(h.macro_fit, 0)} · price {money(h.price, 2)}
                   {h.narrative !== null && h.narrative !== undefined && <> · narrative {num(h.narrative, 0)}</>}
                   {h.prior_weight !== null && h.prior_weight !== undefined && <> · prior weight {pct(h.prior_weight, 1)}</>}
+                  {h.held_days !== null && h.held_days !== undefined && (
+                    <>
+                      {" "}
+                      · held {num(h.held_days, 0)} days{h.long_term_gain_eligible ? <span className="text-pos"> · LT gains ✓</span> : ""}
+                    </>
+                  )}
                 </div>
+                {h.pending_actions !== undefined && (
+                  <div className="mt-3">
+                    <div className="eyebrow mb-1">Pending at next recalibration</div>
+                    {h.pending_actions.length ? (
+                      <ul className="flex flex-col gap-0.5">
+                        {h.pending_actions.map((a, i) => (
+                          <li key={i} className="flex gap-2">
+                            <span className="text-warn">·</span>
+                            <span>{a}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <div className="text-muted">No pending actions.</div>
+                    )}
+                  </div>
+                )}
                 <div className="mt-3 grid gap-x-6 gap-y-3 sm:grid-cols-2">
                   <div>
                     <div className="eyebrow mb-1">Stops</div>

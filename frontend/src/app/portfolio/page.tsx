@@ -140,6 +140,9 @@ export default async function PortfolioPage() {
   const memo = p.memo ?? null;
   const gate = p.regime_gate ?? null;
   const history = histRes.ok ? histRes.data : [];
+  const cadence = p.cadence ?? null;
+  const alerts = p.alerts ?? [];
+  const memoFrom = p.memo_from && p.memo_from !== p.as_of ? p.memo_from : null;
   const sectorRows: [string, number][] = Object.entries(s?.sector_weights ?? {}).sort((a, b) => b[1] - a[1]);
   const themeRows: [string, number][] = [...(s?.theme_weights ?? [])];
   const confidence = memo?.confidence === null || memo?.confidence === undefined ? null : memo.confidence <= 1 ? memo.confidence * 100 : memo.confidence;
@@ -161,6 +164,16 @@ export default async function PortfolioPage() {
             ) : (
               <span className="chip">Recalibrated vs {date(p.prior_as_of)}</span>
             )}
+            {cadence &&
+              (cadence.mode === "recalibrate" ? (
+                <span className="chip border-accent bg-accent-soft text-accent" title={cadence.note}>
+                  Recalibrated today
+                </span>
+              ) : (
+                <span className="chip" title={cadence.note}>
+                  Monitoring · next recalibration {date(cadence.next_recalibration)}
+                </span>
+              ))}
             {p.cooldown && (
               <span
                 className="chip border-warn bg-warn-soft text-warn"
@@ -197,9 +210,21 @@ export default async function PortfolioPage() {
                 {gate.applied === false && <> · reported only, not enforced</>}
               </div>
             )}
+            {cadence?.note && <div className="mt-0.5 text-[12px] text-subtle">{cadence.note}</div>}
           </>
         }
-        meta={<>as of {date(p.as_of)} · rules-based, recalibrated every run</>}
+        meta={
+          <>
+            as of {date(p.as_of)} ·{" "}
+            {cadence ? (
+              <>
+                rules-based, monthly recalibration · last {date(cadence.last_recalibration ?? p.last_recalibration)} · next {date(cadence.next_recalibration)}
+              </>
+            ) : (
+              "rules-based, recalibrated every run"
+            )}
+          </>
+        }
       />
 
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
@@ -266,8 +291,16 @@ export default async function PortfolioPage() {
 
         {memo && (
           <Section
-            title="Weekly memo"
-            subtitle={<span className="text-accent">LLM memo · grounded in this snapshot only</span>}
+            title={memoFrom ? "Recalibration memo" : "Weekly memo"}
+            subtitle={
+              memoFrom ? (
+                <span className="text-accent">
+                  LLM memo · from the {date(memoFrom)} recalibration · carried forward, grounded in that snapshot only
+                </span>
+              ) : (
+                <span className="text-accent">LLM memo · grounded in this snapshot only</span>
+              )
+            }
             className="lg:col-span-2"
             actions={
               <div className="w-40">
@@ -328,7 +361,79 @@ export default async function PortfolioPage() {
         </Section>
 
         <Section
-          title="This week's trades"
+          title="Pending at next recalibration"
+          subtitle={
+            alerts.length
+              ? `${alerts.length} held position${alerts.length === 1 ? "" : "s"} with rule outcomes deferred to ${cadence?.next_recalibration ? date(cadence.next_recalibration) : "the next recalibration"} · only the hard loss cap exits intra-month`
+              : cadence?.mode === "recalibrate"
+                ? "This run recalibrated the book, so nothing is deferred"
+                : "Rule outcomes on held positions that wait for the monthly recalibration"
+          }
+          className="lg:col-span-2"
+          flush
+        >
+          <div className="tbl-wrap">
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>Ticker</th>
+                  <th>Name</th>
+                  <th className="num">Weight</th>
+                  <th className="num">P&amp;L %</th>
+                  <th>Actions</th>
+                  <th title="Held long enough for long-term capital-gains treatment">LT gains</th>
+                </tr>
+              </thead>
+              <tbody>
+                {alerts.map((a, i) => (
+                  <tr key={`${a.ticker}-${i}`} className="align-top">
+                    <td>
+                      <Link href={`/companies/${a.ticker}`} className="font-medium">
+                        {a.ticker}
+                      </Link>
+                    </td>
+                    <td className="max-w-56 truncate text-muted">{a.name ?? "—"}</td>
+                    <td className="num font-medium">{pct(a.weight, 1)}</td>
+                    <td className={`num font-medium ${signClass(a.pnl_pct)}`}>{ptsSigned(a.pnl_pct, 1)}</td>
+                    <td>
+                      <div className="max-w-xl whitespace-normal">
+                        {a.actions?.length ? (
+                          <ul className="flex flex-col gap-0.5 text-[12.5px]">
+                            {a.actions.map((s, j) => (
+                              <li key={j} className="flex gap-2">
+                                <span className="text-warn">·</span>
+                                <span>{s}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <span className="text-muted">—</span>
+                        )}
+                      </div>
+                    </td>
+                    <td>
+                      {a.long_term_gain_eligible ? (
+                        <span className="chip border-pos bg-pos-soft text-pos">LT gains ✓</span>
+                      ) : (
+                        <span className="chip">LT gains ✗</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                {!alerts.length && (
+                  <tr>
+                    <td colSpan={6} className="text-muted">
+                      No pending actions
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Section>
+
+        <Section
+          title={cadence ? "This run's trades" : "This week's trades"}
           subtitle={p.is_initial ? "Initial construction · every position is a BUY" : `${p.trades?.length ?? 0} trades vs ${date(p.prior_as_of)}`}
           className="lg:col-span-2"
           flush

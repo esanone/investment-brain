@@ -26,6 +26,8 @@ export interface Health {
   running_brief?: boolean;
   /** True while an attention refresh (POST /api/attention/run) is in flight. Absent on older backends. */
   running_attention?: boolean;
+  /** True while a Thesis v2 analysis or monthly update (POST /api/thesis-v2[/{id}/update]) is in flight. Absent on older backends. */
+  running_thesis_v2?: boolean;
 }
 
 // ---------------------------------------------------------------- regime
@@ -604,6 +606,13 @@ export interface Holding {
   brief_notes?: string[];
   /** Consecutive runs the trend template scored below 50; exits at `rules.trend_fail_runs`. */
   tech_fail_runs?: number;
+  // ---- monthly cadence (portfolio engine v3); absent on older snapshots ----
+  /** Calendar days since `entered`. */
+  held_days?: Num;
+  /** True once held for `rules.long_term_holding_days` (long-term capital-gains treatment). */
+  long_term_gain_eligible?: boolean;
+  /** Rule outcomes deferred to the next monthly recalibration (monitor mode). */
+  pending_actions?: string[];
 }
 
 export interface Sleeve {
@@ -675,6 +684,29 @@ export interface PortfolioStats {
   avg_stop_distance_pct?: Num;
   /** Weight-averaged P&L since entry, percent points. */
   book_pnl_pct?: Num;
+  /** Number of `alerts` (monthly cadence). */
+  pending_alerts?: number;
+}
+
+export type CadenceMode = "recalibrate" | "monitor";
+
+/** Monthly cadence header (portfolio engine v3): the book trades only on the first run of each month. */
+export interface PortfolioCadence {
+  mode: CadenceMode;
+  last_recalibration: string | null;
+  next_recalibration: string | null;
+  note: string;
+}
+
+/** Rule outcome on a held position that waits for the next monthly recalibration. */
+export interface PortfolioAlert {
+  ticker: string;
+  name: string | null;
+  weight: number;
+  /** Percent points since entry. */
+  pnl_pct: Num;
+  actions: string[];
+  long_term_gain_eligible: boolean;
 }
 
 /** Shape = MEMO_SCHEMA in backend/brain/llm.py. */
@@ -729,6 +761,13 @@ export interface Portfolio {
   /** Turtle drawdown-ladder step in effect (risk/cap multipliers), null when none. */
   ladder_note?: string | null;
   regime_gate?: RegimeGate | null;
+  // ---- monthly cadence (portfolio engine v3); absent on older snapshots ----
+  cadence?: PortfolioCadence | null;
+  last_recalibration?: string | null;
+  /** Held positions with rule outcomes pending the next recalibration (empty on a recalibration run). */
+  alerts?: PortfolioAlert[];
+  /** `as_of` of the recalibration the memo was written at (monitor runs carry the last memo forward). */
+  memo_from?: string | null;
 }
 
 /** RULES values: numbers, the mode string, booleans, or the drawdown ladder `[[dd%, risk mult, cap mult], ...]`. */
@@ -1092,4 +1131,267 @@ export interface ThesisHistoryRow {
   /** [theme name, conviction] for the top 5 themes. */
   top_themes: [string, number][];
   llm: string | null;
+}
+
+// ---------------------------------------------------------------- thesis v2 (Causal Futures Engine)
+/**
+ * Payloads of backend/brain/engines/causal.py served by /api/thesis-v2.
+ * Probabilities (`prior`, `posterior`, `range_*`, scenario `probability`) are in
+ * percent points; evidence `quality`/`independence`/`weight` and analogue
+ * similarity dimensions are fractions (0-1); the four strength/quality scores
+ * are 0-100.
+ */
+export type ThesisV2Status = "open" | "resolved";
+export type ThesisV2Confidence = "High" | "Medium" | "Low";
+export type ThesisV2Contradictory = "Low" | "Moderate" | "High";
+export type EvidenceDirection = "supports" | "contradicts";
+export type EvidenceStrength = "strong" | "moderate" | "weak";
+export type ScenarioKey = "bull" | "base" | "bear";
+export const SCENARIO_KEYS: ScenarioKey[] = ["bull", "base", "bear"];
+
+/** The eight analogue-similarity dimensions, in the engine's order (causal.py SIM_DIMS). */
+export type SimDim =
+  | "motivation"
+  | "friction_removed"
+  | "behavior_change_required"
+  | "trust_dependency"
+  | "infrastructure_dependency"
+  | "network_effects"
+  | "economic_incentive"
+  | "adoption_demographics";
+export const SIM_DIMS: SimDim[] = [
+  "motivation",
+  "friction_removed",
+  "behavior_change_required",
+  "trust_dependency",
+  "infrastructure_dependency",
+  "network_effects",
+  "economic_incentive",
+  "adoption_demographics",
+];
+
+/** The nine causal-mechanism fields, in display order. */
+export type MechanismKey =
+  | "human_motivation"
+  | "friction_removed"
+  | "enabling_technology"
+  | "economic_incentive"
+  | "trust_requirement"
+  | "distribution_mechanism"
+  | "network_effects"
+  | "switching_costs"
+  | "regulatory_constraints";
+export const MECHANISM_KEYS: MechanismKey[] = [
+  "human_motivation",
+  "friction_removed",
+  "enabling_technology",
+  "economic_incentive",
+  "trust_requirement",
+  "distribution_mechanism",
+  "network_effects",
+  "switching_costs",
+  "regulatory_constraints",
+];
+
+export interface ThesisV2Brier {
+  final: Num;
+  time_averaged: Num;
+}
+
+/** Row of /api/thesis-v2 `theses` (causal.py `summary()`). */
+export interface ThesisV2Summary {
+  id: string;
+  title: string | null;
+  statement: string | null;
+  status: ThesisV2Status;
+  created: string | null;
+  horizon: string | null;
+  last_update: string | null;
+  posterior: Num;
+  prior: Num;
+  range_low: Num;
+  range_high: Num;
+  confidence: ThesisV2Confidence | null;
+  stage: string | null;
+  next_confirmation_signal: string | null;
+  n_analogues: number;
+  n_evidence: Num;
+  n_updates: number;
+  outcome: boolean | null;
+  brier: ThesisV2Brier | null;
+}
+
+export interface ThesisV2CalibrationBin {
+  n: number;
+  hits: number;
+  /** Mean stated posterior in the bin, percent points. */
+  avg_p: Num;
+  /** Realised frequency, percent points. */
+  hit_rate: Num;
+}
+
+export interface ThesisV2Scoreboard {
+  open: number;
+  resolved: number;
+  mean_brier_final: Num;
+  mean_brier_time_averaged: Num;
+  /** Keyed by decile label, e.g. "60-70". */
+  calibration: Record<string, ThesisV2CalibrationBin>;
+  note: string;
+}
+
+/** Payload of /api/thesis-v2. */
+export interface ThesisV2List {
+  theses: ThesisV2Summary[];
+  scoreboard: ThesisV2Scoreboard;
+}
+
+export interface ThesisV2Formalized {
+  statement: string;
+  population: string;
+  behavior: string;
+  horizon_year: number;
+  observable_outcome: string;
+  measurable_metric: string;
+}
+
+export interface ThesisV2Analogue {
+  name: string;
+  period: string;
+  mechanism: string;
+  similarity: Partial<Record<SimDim, number>>;
+  /** Mean of the eight dimensions, 0-100. */
+  similarity_score: Num;
+  pattern_occurred: boolean;
+  years_to_mainstream: Num;
+  lesson: string;
+}
+
+export interface ThesisV2ReferenceClass {
+  description: string;
+  caveats: string;
+  /** Analogues with similarity ≥ 40. */
+  n: number;
+  occurred: number;
+  /** Laplace-smoothed base rate, fraction. */
+  base_rate: Num;
+}
+
+export interface ThesisV2Evidence {
+  claim: string;
+  direction: EvidenceDirection;
+  strength: EvidenceStrength | string;
+  quality: number;
+  independence: number;
+  source: string;
+  date: string;
+  kind: EpistemicKind | string;
+  lr: Num;
+  weight: Num;
+  log_lr_weighted: Num;
+  /** Set by a monthly update when the item was superseded. */
+  retired?: boolean;
+  /** ISO date when a monthly update added the item (absent on the original set). */
+  added?: string;
+}
+
+export interface ThesisV2Stage {
+  current_stage: string;
+  prerequisites_met: string[];
+  prerequisites_missing: string[];
+  historical_pathway_position: string;
+}
+
+export interface ThesisV2Scenario {
+  weight: number;
+  description: string;
+  /** Normalised weight, percent points. */
+  probability: Num;
+}
+
+export interface ThesisV2Indicators {
+  supporting: string[];
+  contradictory: string[];
+  next_confirmation_signal: string;
+  biggest_variables: string[];
+}
+
+export type ValuePoolBecomes =
+  | "scarce"
+  | "abundant"
+  | "mandatory_infrastructure"
+  | "new_risk"
+  | "loses_pricing_power"
+  | "gains_pricing_power";
+
+export interface ThesisV2ValuePool {
+  layer: string;
+  emerging_need: string;
+  opportunity: string;
+  becomes: ValuePoolBecomes | string;
+  /** Universe tickers only (filtered by the engine). */
+  tickers: string[];
+}
+
+export interface ThesisV2Probability {
+  prior: Num;
+  posterior: Num;
+  range_low: Num;
+  range_high: Num;
+  log_odds_prior: Num;
+  log_odds_evidence: Num;
+  log_odds_posterior: Num;
+  analogy_strength: Num;
+  evidence_strength: Num;
+  evidence_quality: Num;
+  contradictory_evidence: ThesisV2Contradictory;
+  confidence: ThesisV2Confidence;
+  n_evidence: number;
+  note: string;
+}
+
+export interface ThesisV2Update {
+  date: string;
+  what_changed: string[];
+  new_evidence: number;
+  retired: number;
+  should_change_mind: string | null;
+  posterior_before: Num;
+  posterior_after: Num;
+}
+
+export interface ThesisV2HistoryPoint {
+  date: string;
+  posterior: Num;
+  event: string;
+}
+
+/** Full record as returned by /api/thesis-v2/{id} (404 until the thesis has been analysed). */
+export interface ThesisV2 {
+  id: string;
+  raw_statement: string;
+  created: string;
+  status: ThesisV2Status;
+  outcome: boolean | null;
+  /** ISO date of the horizon year end. */
+  horizon: string | null;
+  title: string;
+  formalized: ThesisV2Formalized;
+  mechanism: Partial<Record<MechanismKey, string>>;
+  analogues: ThesisV2Analogue[];
+  reference_class: ThesisV2ReferenceClass;
+  evidence: ThesisV2Evidence[];
+  stage: ThesisV2Stage;
+  scenarios: Partial<Record<ScenarioKey, ThesisV2Scenario>>;
+  indicators: ThesisV2Indicators;
+  value_pools: ThesisV2ValuePool[];
+  second_order_thesis: string;
+  losers: string[];
+  probability: ThesisV2Probability;
+  updates: ThesisV2Update[];
+  probability_history: ThesisV2HistoryPoint[];
+  brier: ThesisV2Brier | null;
+  last_update: string | null;
+  /** ISO date the thesis was resolved (only when `status` is "resolved"). */
+  resolved?: string;
 }

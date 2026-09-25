@@ -8,6 +8,7 @@ const NAV = [
   { href: "/", label: "Dashboard" },
   { href: "/brief", label: "Brief" },
   { href: "/thesis", label: "Thesis" },
+  { href: "/thesis-v2", label: "Thesis v2" },
   { href: "/attention", label: "Attention" },
   { href: "/regime", label: "Regime" },
   { href: "/flows", label: "Flows" },
@@ -17,8 +18,9 @@ const NAV = [
   { href: "/risk", label: "Risk" },
 ];
 
+/** Match on a whole path segment so "/thesis" does not light up for "/thesis-v2". */
 function isActive(pathname: string, href: string) {
-  return href === "/" ? pathname === "/" : pathname.startsWith(href);
+  return href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`);
 }
 
 export function Shell({ children }: { children: React.ReactNode }) {

@@ -98,7 +98,9 @@ ANALYZE_SYSTEM = (
     "the reference class and the evidence you provide. Formalize the thesis measurably. Decompose the causal mechanism. Retrieve 10-20 "
     "historical analogues that share the MECHANISM (complexity hidden behind an interface, trust infrastructure preceding convenience, "
     "control traded for access, etc.), not the surface technology; score each on the similarity dimensions honestly and say whether the "
-    "hypothesised pattern actually occurred. Provide present-day evidence on BOTH sides with candid quality and independence scores "
+    "hypothesised pattern actually occurred. A reference class must contain the failures and the slow cases, not only the successes: "
+    "at least 35% of the analogues must be transitions where the pattern did NOT occur within the comparable horizon (stalled, reversed, "
+    "stayed niche, or took far longer than expected) — survivorship in analogue selection is the main way this engine would fool itself. Provide present-day evidence on BOTH sides with candid quality and independence scores "
     "(correlated survey results are not independent). Identify the adoption stage, scenarios, indicators to watch, and the value pools: "
     "what becomes scarce, abundant, mandatory infrastructure, a new risk, who gains or loses pricing power, and which universe tickers "
     "are exposed. Label statements by epistemic kind. No disclaimers. Return only the JSON object requested.")

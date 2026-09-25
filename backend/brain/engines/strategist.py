@@ -167,8 +167,11 @@ def compute(company: dict, analysis: dict, scores: dict, exposures: list[dict], 
         breaks.append(f"ROIC falls below {floor:.0f}% (currently {L['roic'] * 100:.1f}%)")
         rules.append({"id": "roic", "label": "ROIC", "metric": "roic", "op": "<", "threshold": round(floor / 100, 4), "current": round(L["roic"], 4)})
     if L.get("operating_margin") is not None:
-        breaks.append(f"Operating margin compresses more than 200 bps YoY (currently {L['operating_margin'] * 100:.1f}%)")
-        rules.append({"id": "margin", "label": "Operating margin change YoY", "metric": "operating_margin_change", "op": "<", "threshold": -0.02, "current": L.get("operating_margin_change")})
+        # relative to the entry reading: a name already compressing at entry must compress a further 200 bps to break
+        m_now = L.get("operating_margin_change") or 0.0
+        m_thr = round(min(-0.02, m_now - 0.02), 4)
+        breaks.append(f"Operating margin YoY change falls below {m_thr * 100:+.1f} pts (currently {m_now * 100:+.1f} pts)")
+        rules.append({"id": "margin", "label": "Operating margin change YoY", "metric": "operating_margin_change", "op": "<", "threshold": m_thr, "current": L.get("operating_margin_change")})
     if sector_rot is not None:
         breaks.append(f"{sector} rotation score stays below -30 for two consecutive weeks (currently {sector_rot:+.0f})")
         rules.append({"id": "rotation", "label": f"{sector} rotation score", "metric": "sector_rotation", "op": "<", "threshold": -30, "consecutive_weeks": 2, "current": sector_rot})

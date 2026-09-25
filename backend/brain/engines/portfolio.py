@@ -39,7 +39,8 @@ RULES = {
     "regime_gate": True, "drawdown_ladder": [[-10.0, 0.5, 0.8], [-20.0, 0.25, 0.64]],   # [book drawdown %, risk-per-position multiplier, equity-cap multiplier]
     "brief_trim_consecutive": 2, "brief_exit_consecutive": 3,
     "earnings_blackout_days": 5, "cooldown_stopouts": 3,
-    "rotation_break_threshold": -30, "rotation_break_days": 12,   # sector rotation must stay below -30 for two consecutive weeks of readings
+    "rotation_break_threshold": -30, "rotation_break_days": 12,
+    "rotation_entry_min": -30,       # no new entries into a sector whose rotation score is below this   # sector rotation must stay below -30 for two consecutive weeks of readings
     "incumbency_bonus": 1.10, "attention_not_priced_bonus": 1.15, "crowded_penalty": 0.75,
 }
 SLEEVE_PROXIES = {
@@ -231,6 +232,10 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], scores: dict
         incumbent = t in incumbents_ok
         if not incumbent and not gate_open:
             rejected.append({"ticker": t, "reason": "Regime gate closed: index below its 10-month average and behind T-bills; no new entries", "score": None})
+            continue
+        sec_rot = rot.get(companies[t]["sector"])
+        if not incumbent and sec_rot is not None and sec_rot < RULES["rotation_entry_min"]:
+            rejected.append({"ticker": t, "reason": f"Capital leaving {companies[t]['sector']} (rotation {sec_rot:+.0f}); entry deferred", "score": None})
             continue
         min_opp = RULES["min_opportunity_incumbent"] if incumbent else RULES["min_opportunity"]
         if st["opportunity_score"] < min_opp or st["expectations_gap"] < RULES["min_gap"]:

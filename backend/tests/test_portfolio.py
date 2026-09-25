@@ -103,3 +103,11 @@ def test_drawdown_ladder_scales_risk_after_losses():
     second = portfolio.compute(strategies, analyses, scores, companies, RISK, FLOWS, REGIME, THEMES, first, 100_000, date(2026, 9, 9), FLOWS)
     assert second["period_return_pct"] < 0 and second["drawdown_pct"] < 0
     assert second["nav_index"] < 1.0 and second["nav_peak"] == 1.0
+
+
+def test_no_new_entries_into_sectors_with_capital_leaving():
+    companies, strategies, analyses, scores = _universe()
+    flows = dict(FLOWS, sector_rotation={"Technology": 20, "Energy": -60})
+    pf = portfolio.compute(strategies, analyses, scores, companies, RISK, flows, REGIME, THEMES, None, 100_000, date(2026, 9, 28))
+    assert not any(h["sector"] == "Energy" for h in pf["holdings"])
+    assert any("Capital leaving Energy" in x["reason"] for x in pf["rejected_technical"])

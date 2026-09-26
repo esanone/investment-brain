@@ -205,11 +205,36 @@ export default async function ThemePage({ params }: { params: Promise<{ id: stri
                 <KV label="GitHub repos" value={num(att.gh_repos, 0)} />
                 {att.youtube && (
                   <>
-                    <KV label="YouTube videos · 7d" value={num(att.youtube.last7, 0)} />
-                    <KV label="YouTube vs 28d" value={ptsSigned(att.youtube.vs_28d_pct)} cls={signClass(att.youtube.vs_28d_pct)} />
+                    {att.youtube.videos_per_day !== null && att.youtube.videos_per_day !== undefined ? (
+                      <KV label="YouTube videos / day" value={num(att.youtube.videos_per_day, 1)} />
+                    ) : (
+                      <KV label="YouTube videos · 7d (estimate)" value={num(att.youtube.last7, 0)} />
+                    )}
+                    {att.youtube.n !== null && att.youtube.n !== undefined && (
+                      <KV label="Measured over" value={`${att.youtube.n} videos · ${num(att.youtube.span_hours, 1)} h`} />
+                    )}
+                    <KV
+                      label="YouTube vs 28d"
+                      value={
+                        att.youtube.vs_28d_pct !== null && att.youtube.vs_28d_pct !== undefined
+                          ? ptsSigned(att.youtube.vs_28d_pct)
+                          : `— (${att.youtube.history_days ?? 0} of 21 days of history)`
+                      }
+                      cls={att.youtube.vs_28d_pct !== null && att.youtube.vs_28d_pct !== undefined ? signClass(att.youtube.vs_28d_pct) : "text-subtle"}
+                    />
                   </>
                 )}
               </div>
+              {att.youtube?.top_titles?.length ? (
+                <div className="mt-3">
+                  <div className="eyebrow mb-1">Newest YouTube uploads for this theme</div>
+                  <ul className="space-y-0.5 text-[12.5px] text-muted">
+                    {att.youtube.top_titles.slice(0, 5).map((t, i) => (
+                      <li key={i} className="truncate" title={t}>· {t}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
             </div>
           </Section>
         )}

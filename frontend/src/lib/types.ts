@@ -1020,9 +1020,16 @@ export interface ThemeAppRank {
 }
 
 export interface ThemeYoutube {
-  last7: number;
-  vs_28d_pct: number;
-  score: number;
+  /** publish velocity: the 50 most recent videos for the theme query, divided by the hours they span */
+  videos_per_day?: Num;
+  n?: Num;
+  span_hours?: Num;
+  history_days?: Num;
+  top_titles?: string[];
+  /** legacy estimate field from the first collector version; null now */
+  last7: Num;
+  vs_28d_pct: Num;
+  score: Num;
 }
 
 export interface ThemeAttention {

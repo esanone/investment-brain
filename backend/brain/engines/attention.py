@@ -175,17 +175,18 @@ def compute(companies: dict[str, dict], company_scores: dict[str, dict], themes_
                 add_obs("github", tid, "repos", total)
                 hg = _append(_obs_series(history, "github", tid, "repos"), today, total)
                 parts["github"] = series_stats(hg) if len(hg) >= 21 else None
-        # youtube (optional key)
+        # youtube (optional key): publish velocity, scored against our own daily history (contributes after ~3 weeks)
         yt = None
         if m.get("youtube"):
-            counts = [src.youtube_counts(q) for q in m["youtube"][:2]]
-            counts = [c for c in counts if c and c.get("last7") is not None and c.get("prior28_weekly")]
-            if counts:
-                last7 = sum(c["last7"] for c in counts)
-                prior = sum(c["prior28_weekly"] for c in counts)
-                slope = last7 / prior - 1 if prior else 0
-                yt = {"last7": last7, "vs_28d_pct": r(slope * 100, 1), "score": r(sigmoid_score(max(-1.5, min(1.5, slope * 3))), 0)}
-                parts["youtube"] = yt
+            v = src.youtube_velocity(m["youtube"][0])
+            if v:
+                add_obs("youtube", tid, "videos_per_day", v["videos_per_day"])
+                hy = _append(_obs_series(history, "youtube", tid, "videos_per_day"), today, v["videos_per_day"])
+                st_y = series_stats(hy) if len(hy) >= 21 else None
+                yt = {"videos_per_day": v["videos_per_day"], "n": v["n"], "span_hours": v["span_hours"], "top_titles": v["top_titles"],
+                      "history_days": int(len(hy)), "vs_28d_pct": (st_y or {}).get("vs_28d_pct"), "score": (st_y or {}).get("score"),
+                      "last7": None}
+                parts["youtube"] = st_y
         rising = []
         for seed in (m.get("seeds") or [])[:2]:
             rising.extend(src.autocomplete(seed))

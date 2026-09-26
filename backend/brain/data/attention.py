@@ -90,24 +90,26 @@ def autocomplete(seed: str) -> list[str]:
         return []
 
 
-def youtube_counts(query: str) -> Optional[dict]:
-    """Videos published in the last 7 days vs the prior 28 (needs YOUTUBE_API_KEY; 100 quota units per call)."""
+def youtube_velocity(query: str) -> Optional[dict]:
+    """Publish velocity for a query: the 50 most recent videos and the time they span -> videos/day.
+    One search call (100 quota units); comparable day to day, unlike the API's estimated totalResults."""
     key = getattr(settings, "youtube_api_key", None)
     if not key:
         return None
-    now = datetime.now(timezone.utc)
+    try:
+        d = cached_get_json("https://www.googleapis.com/youtube/v3/search", namespace="youtube",
+                            key=f"{query}_recent_{date.today():%Y%m%d}", ttl_hours=20,
+                            params={"part": "snippet", "type": "video", "q": query, "maxResults": 50, "order": "date", "key": key})
+    except Exception as e:
+        print(f"[attention] youtube {query!r}: {e}")
+        return None
+    items = d.get("items") or []
+    ts = [datetime.fromisoformat(i["snippet"]["publishedAt"].replace("Z", "+00:00")) for i in items if i.get("snippet", {}).get("publishedAt")]
+    if len(ts) < 5:
+        return None
+    span_h = max((max(ts) - min(ts)).total_seconds() / 3600, 1.0)
+    return {"videos_per_day": round(len(ts) / span_h * 24, 2), "n": len(ts), "span_hours": round(span_h, 1),
+            "newest": max(ts).isoformat(), "top_titles": [i["snippet"]["title"] for i in items[:5]]}
 
-    def count(after: datetime, before: datetime) -> Optional[int]:
-        try:
-            d = cached_get_json("https://www.googleapis.com/youtube/v3/search", namespace="youtube",
-                                key=f"{query}_{after:%Y%m%d}_{before:%Y%m%d}", ttl_hours=20,
-                                params={"part": "id", "type": "video", "q": query, "maxResults": 50, "order": "date",
-                                        "publishedAfter": after.strftime("%Y-%m-%dT%H:%M:%SZ"), "publishedBefore": before.strftime("%Y-%m-%dT%H:%M:%SZ"), "key": key})
-            return d.get("pageInfo", {}).get("totalResults")
-        except Exception as e:
-            print(f"[attention] youtube {query!r}: {e}")
-            return None
 
-    last7 = count(now - timedelta(days=7), now)
-    prior28 = count(now - timedelta(days=35), now - timedelta(days=7))
-    return {"last7": last7, "prior28_weekly": (prior28 / 4) if prior28 is not None else None}
+youtube_counts = youtube_velocity   # backwards-compatible name

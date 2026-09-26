@@ -160,6 +160,8 @@ Install the weekday 06:15 schedule as a macOS LaunchAgent:
 ./scripts/install_schedule.sh
 ```
 
+LLM spend per day: the brief only (Opus). The long-term thesis rebuilds weekly (Mondays); per-company enrichment (Sonnet) and the memo run on the monthly recalibration day, and monitor days carry the last enriched theses forward. Force enrichment with `run --enrich`.
+
 The job only fires while the Mac is awake and you are logged in. Either keep it awake (`sudo pmset repeat wakeorpoweron
 MTWRF 06:10:00`) or, for a machine-independent schedule, host the backend on Railway/Render with the same command as a
 cron job. Logs go to `backend/data/morning.log`; the dashboard reads the latest snapshots whenever it is opened.

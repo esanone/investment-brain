@@ -393,7 +393,7 @@ def portfolio_history() -> list[dict]:
 
 
 @app.post("/api/run")
-def trigger_run(background: BackgroundTasks, limit: Optional[int] = None, skip_ingest: bool = False) -> dict:
+def trigger_run(background: BackgroundTasks, limit: Optional[int] = None, skip_ingest: bool = False, enrich: bool = False) -> dict:
     if _run_state["running"]:
         return {"started": False, "reason": "already running"}
 
@@ -401,7 +401,7 @@ def trigger_run(background: BackgroundTasks, limit: Optional[int] = None, skip_i
         from .pipeline import run
         _run_state["running"], _run_state["last_error"] = True, None
         try:
-            run(limit=limit, skip_ingest=skip_ingest)
+            run(limit=limit, skip_ingest=skip_ingest, force_enrich=enrich)
         except Exception as e:  # surfaced via /api/health
             _run_state["last_error"] = str(e)
         finally:

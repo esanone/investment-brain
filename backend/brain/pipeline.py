@@ -203,6 +203,17 @@ def run_brief(use_llm: bool = True) -> dict:
     return b
 
 
+def run_longterm_if_due(use_llm: bool = True) -> Optional[dict]:
+    """Weekly cadence: rebuild on Mondays, when none exists, or when the last one is 7+ days old."""
+    last = load_prior("longterm")
+    today = date.today()
+    due = last is None or today.weekday() == 0 or (today - date.fromisoformat(last["as_of"])).days >= 7
+    if not due:
+        log(f"longterm: current thesis from {last['as_of']} still fresh; next rebuild Monday")
+        return None
+    return run_longterm(use_llm=use_llm)
+
+
 def run_longterm(use_llm: bool = True) -> dict:
     """Human Future engine: reconcile every brief's long-term observations into one thesis + theme conviction."""
     from .engines import longterm as lt_engine
@@ -413,7 +424,7 @@ def _latest_run_id(s) -> Optional[str]:
 
 
 # ------------------------------------------------------------------ compute
-def compute_all(frames: dict, as_of: date, use_llm: bool, llm_top_n: Optional[int] = None) -> dict:
+def compute_all(frames: dict, as_of: date, use_llm: bool, llm_top_n: Optional[int] = None, force_enrich: bool = False) -> dict:
     llm_top_n = llm_top_n or settings.llm_top_n
     companies, prices, macro = frames["companies"], frames["prices"], frames["macro"]
     log("engine: economic regime")
@@ -469,7 +480,20 @@ def compute_all(frames: dict, as_of: date, use_llm: bool, llm_top_n: Optional[in
         f"cash {portfolio['cash_weight']:.0%}), {len(portfolio['trades'])} trades, {len(portfolio['exits'])} exits, "
         f"{len(portfolio['rejected_technical'])} rejected by the technical gate" + (" (initial)" if portfolio["is_initial"] else ""))
 
-    if use_llm and llm_provider():
+    recal_day = portfolio.get("cadence", {}).get("mode", "recalibrate") == "recalibrate"
+    if use_llm and llm_provider() and not (recal_day or force_enrich):
+        # Monitor day: no LLM spend. Carry the last enriched theses forward so company pages keep their reads.
+        carried = 0
+        with session_scope() as s:
+            rid = _latest_run_id(s)
+            prev = {x.key: x.payload for x in s.execute(select(Snapshot).where(Snapshot.run_id == rid, Snapshot.kind == "company")).scalars()} if rid else {}
+        for t, st in strategies.items():
+            pl = (prev.get(t) or {}).get("strategist", {})
+            if pl.get("llm"):
+                st["llm"], st["llm_enriched"], st["llm_from"] = pl["llm"], True, pl.get("llm_from") or (prev[t].get("as_of") or rid[:8] if rid else None)
+                carried += 1
+        log(f"llm: monitor day — no enrichment (next at the {portfolio['cadence'].get('next_recalibration')} recalibration); carried {carried} prior theses forward")
+    if use_llm and llm_provider() and (recal_day or force_enrich):
         holdings = [h["ticker"] for h in portfolio["holdings"]]
         targets = list(dict.fromkeys(holdings + [x["ticker"] for x in ranked[:llm_top_n]]))
         log(f"llm: enriching {len(targets)} theses via {llm_provider()} ({settings.anthropic_bulk_model if llm_provider() == 'anthropic' else settings.openai_model}; "
@@ -518,7 +542,7 @@ def persist(results: dict, frames: dict, as_of: date) -> str:
             s.add(Snapshot(run_id=run_id, kind="theme", key=th["id"], as_of=as_of, payload=th))
         for t, st in results["strategies"].items():
             a = results["analyses"][t]
-            payload = {"company": companies[t], "scores": results["scores"][t], "strategist": st, "technical": results.get("technicals", {}).get(t),
+            payload = {"as_of": as_of.isoformat(), "company": companies[t], "scores": results["scores"][t], "strategist": st, "technical": results.get("technicals", {}).get(t),
                        "fundamentals": {"latest": a["latest"], "history": a["history"], "valuation": a["valuation"],
                                         "momentum": a["momentum"], "price": a["price"], "data_quality": a["data_quality"]}}
             s.add(Snapshot(run_id=run_id, kind="company", key=t, as_of=as_of, payload=payload))
@@ -532,7 +556,7 @@ def persist(results: dict, frames: dict, as_of: date) -> str:
 
 
 # ------------------------------------------------------------------ CLI
-def run(limit: Optional[int] = None, skip_ingest: bool = False, use_llm: bool = True, as_of: Optional[date] = None) -> str:
+def run(limit: Optional[int] = None, skip_ingest: bool = False, use_llm: bool = True, as_of: Optional[date] = None, force_enrich: bool = False) -> str:
     t0 = time.time()
     init_db()
     limit = limit or settings.universe_limit
@@ -545,7 +569,7 @@ def run(limit: Optional[int] = None, skip_ingest: bool = False, use_llm: bool = 
         ingest_fundamentals(tickers)
     frames = load_frames(tickers)
     as_of = as_of or date.today()
-    results = compute_all(frames, as_of, use_llm)
+    results = compute_all(frames, as_of, use_llm, force_enrich=force_enrich)
     run_id = persist(results, frames, as_of)
     log(f"done: run {run_id} in {time.time() - t0:.0f}s; top: " +
         ", ".join(f"{x['ticker']} {x['opportunity_score']} (gap {x['expectations_gap']:+.0f})" for x in results["ranked"][:8] if x["expectations_gap"] is not None))
@@ -565,6 +589,7 @@ def main() -> None:
     ap.add_argument("--skip-ingest", action="store_true")
     ap.add_argument("--no-llm", action="store_true")
     ap.add_argument("--as-of", type=str, default=None)
+    ap.add_argument("--enrich", action="store_true", help="run: force LLM enrichment even on a monitor day")
     a = ap.parse_args()
     if a.cmd == "attention":
         run_attention()
@@ -597,7 +622,7 @@ def main() -> None:
             log(f"attention: failed ({e}); continuing")
         run_brief(use_llm=not a.no_llm)
         try:
-            run_longterm(use_llm=not a.no_llm)
+            run_longterm_if_due(use_llm=not a.no_llm)
         except Exception as e:
             log(f"longterm: failed ({e}); continuing with the previous thesis")
         if not a.no_llm:
@@ -607,7 +632,7 @@ def main() -> None:
                     run_thesis_v2_opportunities()
             except Exception as e:
                 log(f"thesis-v2: monthly review failed ({e}); continuing")
-        run(a.limit, a.skip_ingest, not a.no_llm)
+        run(a.limit, a.skip_ingest, not a.no_llm, force_enrich=a.enrich)
         return
     if a.cmd == "ingest":
         init_db()
@@ -617,7 +642,7 @@ def main() -> None:
         ingest_prices(list(INSTRUMENTS) + tickers)
         ingest_fundamentals(tickers)
     else:
-        run(a.limit, a.skip_ingest, not a.no_llm, date.fromisoformat(a.as_of) if a.as_of else None)
+        run(a.limit, a.skip_ingest, not a.no_llm, date.fromisoformat(a.as_of) if a.as_of else None, force_enrich=a.enrich)
 
 
 if __name__ == "__main__":

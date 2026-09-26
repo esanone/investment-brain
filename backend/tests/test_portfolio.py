@@ -128,3 +128,15 @@ def test_monthly_cadence_monitors_between_recalibrations_and_exits_only_on_hard_
     # new month -> full recalibration trades again
     nxt = portfolio.compute(strategies, analyses, scores, companies, RISK, FLOWS, REGIME, THEMES, mid, 100_000, date(2026, 11, 2), FLOWS)
     assert nxt["cadence"]["mode"] == "recalibrate" and nxt["last_recalibration"] == "2026-11-02"
+
+
+def test_human_futures_ranking_scales_conviction():
+    companies, strategies, analyses, scores = _universe()
+    base = portfolio.compute(strategies, analyses, scores, companies, RISK, FLOWS, REGIME, THEMES, None, 100_000, date(2026, 10, 1))
+    ranking = {"candidates": [{"ticker": "C", "score": 8.0, "theses": [{"thesis_id": "T-004"}]}], "losers": [{"ticker": "A", "headwind": -1.5}]}
+    pf = portfolio.compute(strategies, analyses, scores, companies, RISK, FLOWS, REGIME, THEMES, None, 100_000, date(2026, 10, 1), hfe_ranking=ranking)
+    conv = {h["ticker"]: h["conviction"] for h in pf["holdings"]}
+    conv0 = {h["ticker"]: h["conviction"] for h in base["holdings"]}
+    assert conv["C"] > conv0["C"] and abs(conv["C"] / conv0["C"] - 1.35) < 0.02
+    assert conv["A"] < conv0["A"] and abs(conv["A"] / conv0["A"] - 0.80) < 0.02
+    assert next(h for h in pf["holdings"] if h["ticker"] == "C")["hfe_mult"] == 1.35

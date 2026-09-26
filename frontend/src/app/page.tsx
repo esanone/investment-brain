@@ -173,7 +173,7 @@ export default async function DashboardPage() {
         {/* THESIS V2 PICKS */}
         {opps && (
           <Section
-            title="Thesis v2 picks"
+            title="Human Futures Engine picks"
             subtitle={
               <Link href="/thesis-v2" className="hover:text-accent">
                 Stocks positioned for the open theses · {opps.n_theses} open thes{opps.n_theses === 1 ? "is" : "es"} · as of {opps.as_of}

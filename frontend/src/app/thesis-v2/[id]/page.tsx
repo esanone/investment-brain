@@ -30,7 +30,7 @@ export async function generateStaticParams(): Promise<{ id: string }[]> {
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  return { title: `Thesis v2 · ${id.toUpperCase()}` };
+  return { title: `Human Futures Engine · ${id.toUpperCase()}` };
 }
 
 const SCENARIO_LABELS: Record<string, string> = { bull: "Bull", base: "Base", bear: "Bear" };
@@ -90,7 +90,7 @@ export default async function ThesisV2Page({ params }: { params: Promise<{ id: s
   if (!res.ok) {
     return (
       <>
-        <PageHeader title={`Thesis v2 · ${id}`} meta={<Link href="/thesis-v2" className="hover:text-accent">← Thesis ledger</Link>} />
+        <PageHeader title={`Human Futures Engine · ${id}`} meta={<Link href="/thesis-v2" className="hover:text-accent">← Thesis ledger</Link>} />
         {res.status === 404 ? (
           <div className="mx-auto mt-10 max-w-2xl rounded-md border border-line bg-surface px-6 py-6">
             <h2 className="text-[15px] font-semibold">No thesis {id}</h2>
@@ -141,7 +141,7 @@ export default async function ThesisV2Page({ params }: { params: Promise<{ id: s
         meta={
           <>
             <Link href="/thesis-v2" className="hover:text-accent">
-              Thesis v2
+              Human Futures Engine
             </Link>{" "}
             · {t.id} · created {date(t.created)} → horizon {date(t.horizon)} · last update {date(t.last_update)}
             {t.resolved && <> · resolved {date(t.resolved)}</>}

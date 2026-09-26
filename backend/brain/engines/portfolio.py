@@ -46,6 +46,9 @@ RULES = {
     # capital-gains treatment (>= 365 days held) unless a rule fires.
     "recalibration_cadence": "monthly", "intra_month_exits": "hard_stop", "long_term_holding_days": 365,   # sector rotation must stay below -30 for two consecutive weeks of readings
     "incumbency_bonus": 1.10, "attention_not_priced_bonus": 1.15, "crowded_penalty": 0.75,
+    # Human Futures Engine ranking (posterior-weighted value-pool exposure): x0.85 for names it does not favour,
+    # up to x1.35 for the top-ranked name; names with net headwind exposure x0.8
+    "hfe_min_mult": 0.85, "hfe_max_mult": 1.35, "hfe_headwind_mult": 0.8,
 }
 SLEEVE_PROXIES = {
     "Treasuries": [("IEF", "7-10y Treasuries", 0.6), ("TLT", "20+y Treasuries", 0.4)],
@@ -223,8 +226,10 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], scores: dict
             risk: dict, flows: dict, regime: dict, themes_by_id: dict[str, dict], prior: Optional[dict],
             portfolio_value: float, as_of: Optional[date] = None, prior_flows: Optional[dict] = None,
             technicals: Optional[dict[str, dict]] = None, longterm: Optional[dict] = None, attention: Optional[dict] = None,
-            briefs: Optional[list[dict]] = None, rotation_history: Optional[dict[str, list]] = None) -> dict:
-    """rotation_history: {sector: [(date, rotation_score), ...]} from prior flows snapshots (oldest first)."""
+            briefs: Optional[list[dict]] = None, rotation_history: Optional[dict[str, list]] = None,
+            hfe_ranking: Optional[dict] = None) -> dict:
+    """rotation_history: {sector: [(date, rotation_score), ...]} from prior flows snapshots (oldest first).
+    hfe_ranking: the Human Futures Engine opportunities payload (candidates + losers) feeding conviction."""
     today = as_of or date.today()
     technicals, briefs = technicals or {}, briefs or []
     probs = regime.get("regime", {}).get("probabilities", {})
@@ -234,6 +239,9 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], scores: dict
     theme_trends = {k: v.get("trend") for k, v in themes_by_id.items()}
     lt_conv = (longterm or {}).get("theme_conviction", {})
     att_c = {c["ticker"]: c for c in (attention or {}).get("companies", [])}
+    hfe_c = {c["ticker"]: c for c in (hfe_ranking or {}).get("candidates", [])}
+    hfe_losers = {c["ticker"]: c for c in (hfe_ranking or {}).get("losers", [])}
+    hfe_top = max((c.get("score") or 0) for c in hfe_c.values()) if hfe_c else 0.0
     prior_holdings = {h["ticker"]: h for h in (prior or {}).get("holdings", [])}
     bench_3m = flows.get("benchmark", {}).get("return_3m") or 0
     prior_as_of = date.fromisoformat(prior["as_of"]) if prior and prior.get("as_of") else None
@@ -377,6 +385,17 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], scores: dict
         conviction *= lt_mult
         if lt is not None:
             notes.append(f"Long-term theme conviction {lt:.2f} (x{lt_mult:.2f})")
+        hc, hfe_mult, hfe_score = hfe_c.get(t), 1.0, None
+        if hc and hfe_top > 0:
+            hfe_score = hc.get("score") or 0
+            hfe_mult = RULES["hfe_min_mult"] + (RULES["hfe_max_mult"] - RULES["hfe_min_mult"]) * min(hfe_score / hfe_top, 1.0)
+            notes.append(f"Human Futures Engine rank: score {hfe_score:.1f} via {', '.join(x['thesis_id'] for x in hc.get('theses', [])[:3])} (x{hfe_mult:.2f})")
+        elif t in hfe_losers:
+            hfe_mult = RULES["hfe_headwind_mult"]
+            notes.append(f"Human Futures Engine headwind {hfe_losers[t].get('headwind')} (x{hfe_mult:.2f})")
+        elif hfe_c:
+            hfe_mult = RULES["hfe_min_mult"]
+        conviction *= hfe_mult
         ac = att_c.get(t)
         if ac and ac.get("not_priced"):
             conviction *= RULES["attention_not_priced_bonus"]; notes.append("Attention rising, not yet priced")
@@ -391,7 +410,8 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], scores: dict
         cands.append({"ticker": t, "name": companies[t]["name"], "sector": companies[t]["sector"], "conviction": conviction,
                       "opportunity": opp, "gap": gap, "reality": st.get("reality"), "narrative": st.get("narrative"), "pricing": st.get("pricing"),
                       "quality": sc.get("quality"), "growth": sc.get("growth"), "value": sc.get("value"), "macro_fit": macro_fit,
-                      "lt_conviction": r(lt, 2), "attention": (ac or {}).get("attention"), "price": a.get("price"), "notes": notes, "incumbent": incumbent,
+                      "lt_conviction": r(lt, 2), "attention": (ac or {}).get("attention"), "hfe_score": r(hfe_score, 2), "hfe_mult": r(hfe_mult, 2),
+                      "price": a.get("price"), "notes": notes, "incumbent": incumbent,
                       "technical": ta, "themes": _theme_weights(exps), "top_theme": exps[0]["theme"] if exps else None,
                       "rationale": [c["label"] for c in st.get("checks", []) if c.get("ok")][:4]})
     cands.sort(key=lambda c: -c["conviction"])
@@ -464,6 +484,7 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], scores: dict
             "entry_price": r(c["entry_price"], 2), "pnl_pct": r((price / c["entry_price"] - 1) * 100, 1) if price and c["entry_price"] else None,
             "trail_high": r(inc.get("trail_high") or price, 2), "stops": c["stops"],
             "conviction": r(c["conviction"], 1), "lt_conviction": c["lt_conviction"], "attention": c["attention"],
+            "hfe_score": c.get("hfe_score"), "hfe_mult": c.get("hfe_mult"),
             "opportunity": c["opportunity"], "gap": c["gap"], "reality": c["reality"], "narrative": c["narrative"], "pricing": c["pricing"],
             "quality": c["quality"], "growth": c["growth"], "value": c["value"], "macro_fit": r(c["macro_fit"], 0),
             "technical": {k: c["technical"][k] for k in ("score", "passes", "stage", "ready", "rsi14", "atr_pct", "rs_6m", "pct_from_52w_high")} if c["technical"] else None,

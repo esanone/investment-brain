@@ -475,7 +475,7 @@ def compute_all(frames: dict, as_of: date, use_llm: bool, llm_top_n: Optional[in
     portfolio = portfolio_engine.compute(strategies, analyses, scores, companies, risk, flows, regime, themes_by_id,
                                          prior_pf, settings.portfolio_value, as_of, prior_flows,
                                          technicals=technicals, longterm=longterm, attention=attention, briefs=load_briefs(5),
-                                         rotation_history=rotation_history)
+                                         rotation_history=rotation_history, hfe_ranking=load_prior("thesis_v2_opportunities"))
     log(f"engine: portfolio = {portfolio['stats']['positions']} positions, equity {portfolio['equity_weight']:.0%} (cap {portfolio['equity_cap']:.0%}, "
         f"cash {portfolio['cash_weight']:.0%}), {len(portfolio['trades'])} trades, {len(portfolio['exits'])} exits, "
         f"{len(portfolio['rejected_technical'])} rejected by the technical gate" + (" (initial)" if portfolio["is_initial"] else ""))

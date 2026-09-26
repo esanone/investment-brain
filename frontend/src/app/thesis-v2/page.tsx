@@ -13,7 +13,7 @@ import { ThesisV2NewForm } from "@/components/ThesisV2NewForm";
 import { ThesisV2OpportunitiesTable } from "@/components/ThesisV2OpportunitiesTable";
 
 export * from "@/lib/segment-config";
-export const metadata: Metadata = { title: "Thesis v2" };
+export const metadata: Metadata = { title: "Human Futures Engine" };
 
 const INTRO = "Causal Futures Engine · historical analogies → reference-class prior → Bayesian update → value pools";
 
@@ -48,7 +48,7 @@ export default async function ThesisV2LedgerPage() {
   if (!res.ok && res.status !== 404) {
     return (
       <>
-        <PageHeader title="Thesis v2" subtitle={<span className="text-accent">{INTRO}</span>} />
+        <PageHeader title="Human Futures Engine" subtitle={<span className="text-accent">{INTRO}</span>} />
         <EmptyState message={res.message} />
       </>
     );
@@ -64,7 +64,7 @@ export default async function ThesisV2LedgerPage() {
   return (
     <>
       <PageHeader
-        title="Thesis v2"
+        title="Human Futures Engine"
         subtitle={<span className="text-accent">{INTRO}</span>}
         meta={
           <>

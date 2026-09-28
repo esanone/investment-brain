@@ -49,6 +49,7 @@ RULES = {
     # Human Futures Engine ranking (posterior-weighted value-pool exposure): x0.85 for names it does not favour,
     # up to x1.35 for the top-ranked name; names with net headwind exposure x0.8
     "hfe_min_mult": 0.85, "hfe_max_mult": 1.35, "hfe_headwind_mult": 0.8,
+    "insider_cluster_mult": 1.10, "insider_notable_mult": 1.05, "high_severity_8k_mult": 0.7, "officer_change_mult": 0.9,
 }
 SLEEVE_PROXIES = {
     "Treasuries": [("IEF", "7-10y Treasuries", 0.6), ("TLT", "20+y Treasuries", 0.4)],
@@ -227,7 +228,7 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], scores: dict
             portfolio_value: float, as_of: Optional[date] = None, prior_flows: Optional[dict] = None,
             technicals: Optional[dict[str, dict]] = None, longterm: Optional[dict] = None, attention: Optional[dict] = None,
             briefs: Optional[list[dict]] = None, rotation_history: Optional[dict[str, list]] = None,
-            hfe_ranking: Optional[dict] = None) -> dict:
+            hfe_ranking: Optional[dict] = None, events: Optional[dict] = None) -> dict:
     """rotation_history: {sector: [(date, rotation_score), ...]} from prior flows snapshots (oldest first).
     hfe_ranking: the Human Futures Engine opportunities payload (candidates + losers) feeding conviction."""
     today = as_of or date.today()
@@ -242,6 +243,7 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], scores: dict
     hfe_c = {c["ticker"]: c for c in (hfe_ranking or {}).get("candidates", [])}
     hfe_losers = {c["ticker"]: c for c in (hfe_ranking or {}).get("losers", [])}
     hfe_top = max((c.get("score") or 0) for c in hfe_c.values()) if hfe_c else 0.0
+    ev_trig = (events or {}).get("triggers", {})
     prior_holdings = {h["ticker"]: h for h in (prior or {}).get("holdings", [])}
     bench_3m = flows.get("benchmark", {}).get("return_3m") or 0
     prior_as_of = date.fromisoformat(prior["as_of"]) if prior and prior.get("as_of") else None
@@ -396,6 +398,17 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], scores: dict
         elif hfe_c:
             hfe_mult = RULES["hfe_min_mult"]
         conviction *= hfe_mult
+        tr = ev_trig.get(t)
+        if tr:
+            fl = tr.get("flags", [])
+            if "insider_cluster_buy" in fl:
+                conviction *= RULES["insider_cluster_mult"]; notes.append("Insider cluster buy (x1.10)")
+            elif "insider_notable_buy" in fl:
+                conviction *= RULES["insider_notable_mult"]; notes.append("Notable insider buy (x1.05)")
+            if "8k_high_severity" in fl:
+                conviction *= RULES["high_severity_8k_mult"]; notes.append("High-severity 8-K (restatement/bankruptcy/delisting/debt): x0.7, review")
+            elif "officer_change" in fl:
+                conviction *= RULES["officer_change_mult"]; notes.append("8-K 5.02 officer/director change (x0.9)")
         ac = att_c.get(t)
         if ac and ac.get("not_priced"):
             conviction *= RULES["attention_not_priced_bonus"]; notes.append("Attention rising, not yet priced")

@@ -140,3 +140,28 @@ def test_causal_posterior_is_computed_from_reference_class_and_evidence():
     assert rec["probability"]["posterior"] > 75.0             # retiring the contradiction moves it up
     resolved = causal.resolve(dict(rec), True)
     assert 0 <= resolved["brier"]["final"] <= 1 and resolved["status"] == "resolved"
+
+
+def test_events_engine_cluster_buy_and_severity():
+    from datetime import date, timedelta
+    from brain.engines import events
+    today = date(2026, 9, 28)
+    tx = lambda t, owner, code, value, days_ago, r10=False, officer=True: {"ticker": t, "owner": owner, "code": code, "acquired": code == "P", "value": value,  # noqa: E731
+        "shares": 100, "price": value / 100, "date": today - timedelta(days=days_ago), "filed": today, "title": "CFO", "is_officer": officer, "is_director": False,
+        "is_ten_pct": False, "rule_10b5_1": r10, "url": ""}
+    txs = [tx("A", "Alice", "P", 120_000, 3), tx("A", "Bob", "P", 90_000, 9),            # two insiders in 14 days -> cluster
+           tx("B", "Carol", "P", 400_000, 5),                                             # one big buy -> notable
+           tx("C", "Dan", "P", 900_000, 2, r10=True),                                     # 10b5-1 -> ignored
+           tx("D", "Eve", "S", 8_000_000, 4)]                                             # heavy selling
+    companies = {t: {"name": t, "sector": "Technology"} for t in "ABCD"}
+    filings = [{"ticker": "D", "form": "8-K", "filed": (today - timedelta(days=2)).isoformat(), "items": "4.02,9.01", "url": ""},
+               {"ticker": "B", "form": "8-K", "filed": (today - timedelta(days=1)).isoformat(), "items": "2.02", "url": ""}]
+    quotes = {"A": {"c": 110.0, "pc": 100.0}, "B": {"c": 101.0, "pc": 100.0}}
+    out = events.compute(companies, txs, filings, [], quotes, {"A"}, today)
+    ins = out["triggers"]
+    assert "insider_cluster_buy" in ins["A"]["flags"] and "gap_up" in ins["A"]["flags"]
+    assert "insider_notable_buy" in ins["B"]["flags"] and "results_filed" in ins["B"]["flags"]
+    assert "C" not in ins                                     # 10b5-1 purchase is not a signal
+    assert "8k_high_severity" in ins["D"]["flags"]
+    assert out["tape"][0]["ticker"] == "A"                     # portfolio names first
+    assert out["gaps"][0]["gap_pct"] == 10.0 and len(out["gaps"]) == 1

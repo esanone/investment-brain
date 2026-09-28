@@ -41,7 +41,8 @@ class Settings(BaseSettings):
     # Frontend origin for CORS
     portfolio_value: float = 100_000.0        # notional for share counts
     llm_top_n: int = 15                       # theses enriched beyond the portfolio holdings
-    youtube_api_key: Optional[str] = None     # optional: YouTube Data API v3 key for video-velocity attention
+    youtube_api_key: Optional[str] = None
+    finnhub_api_key: Optional[str] = None     # optional: earnings calendar, per-ticker news, pre-market quotes (gap scan)     # optional: YouTube Data API v3 key for video-velocity attention
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
 

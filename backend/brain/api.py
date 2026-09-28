@@ -68,6 +68,7 @@ def health() -> dict:
         rid = _latest_run_id(s)
     return {"ok": True, "latest_run": rid, "running": _run_state["running"], "running_brief": _run_state["running_brief"],
             "running_attention": _run_state.get("running_attention", False), "running_thesis_v2": _run_state.get("running_thesis_v2", False),
+            "running_events": _run_state.get("running_events", False),
             "last_error": _run_state["last_error"]}
 
 
@@ -154,7 +155,9 @@ def company(ticker: str, run_id: Optional[str] = None) -> dict:
     p = _one("company", ticker.upper(), run_id)
     att = _latest_attention()
     a = next((c for c in (att or {}).get("companies", []) if c["ticker"] == ticker.upper()), None)
-    return {**p, "attention": a}
+    from .pipeline import load_prior
+    ev = (load_prior("events") or {}).get("triggers", {}).get(ticker.upper())
+    return {**p, "attention": a, "events": ev}
 
 
 @app.get("/api/search")
@@ -347,6 +350,25 @@ def thesis_v2_resolve(thesis_id: str, body: ResolveIn) -> dict:
         return run_thesis_v2_resolve(thesis_id.upper(), body.outcome)
     except ValueError as e:
         raise HTTPException(404, str(e))
+
+
+@app.get("/api/events")
+def events() -> dict:
+    from .pipeline import load_prior
+    e = load_prior("events")
+    if not e:
+        raise HTTPException(404, "No events tape yet. Run: python -m brain.pipeline events")
+    return e
+
+
+@app.post("/api/events/run")
+def trigger_events(background: BackgroundTasks) -> dict:
+    from .pipeline import run_events
+    j = _bg("running_events", run_events)
+    if "job" not in j:
+        return j
+    background.add_task(j["job"])
+    return {"started": True}
 
 
 @app.get("/api/attention")

@@ -20,7 +20,7 @@ from .db import init_db, session_scope
 from .engines import flows as flows_engine, fundamentals as fund_engine, regime as regime_engine
 from .engines import portfolio as portfolio_engine, risk as risk_engine, strategist, themes as theme_engine
 from .llm import enrich_thesis, portfolio_memo, provider as llm_provider
-from .models import AttentionObservation, Company, Fundamental, Instrument, MacroObservation, Price, Snapshot, Theme, ThemeExposure
+from .models import AttentionObservation, Company, FilingEvent, Fundamental, InsiderTransaction, Instrument, MacroObservation, Price, Snapshot, Theme, ThemeExposure
 from .universe import COMPANIES, INSTRUMENTS, company_tickers
 
 
@@ -193,7 +193,11 @@ def run_brief(use_llm: bool = True) -> dict:
                              "not_priced": [x.get("ticker") or x.get("name") for x in att["movers"]["not_priced"][:10]],
                              "crowded": [c["ticker"] for c in att["movers"]["crowded"][:10]]}
     log("brief: fetching news feeds")
-    b = brief_engine.build(regime, flows, portfolio, prior[0] if prior else None, companies, use_llm=use_llm, attention=attention_summary)
+    ev = load_prior("events") or {}
+    events_summary = {"tape": [{k: x[k] for k in ("ticker", "in_portfolio", "flags", "headline")} for x in ev.get("tape", [])[:25]],
+                      "earnings_today": [e.get("symbol") for e in ev.get("earnings", {}).get("today", [])][:20],
+                      "gaps": [(g["ticker"], g["gap_pct"]) for g in ev.get("gaps", [])[:15]]} if ev else None
+    b = brief_engine.build(regime, flows, portfolio, prior[0] if prior else None, companies, use_llm=use_llm, attention=attention_summary, events=events_summary)
     log(f"brief: {b['n_headlines']} headlines, {len(b['clusters'])} theme clusters, llm={b['llm_provider']}")
     with session_scope() as s:
         s.add(Snapshot(run_id=b["brief_id"], kind="brief", key="", as_of=date.fromisoformat(b["as_of"]), payload=b))
@@ -391,6 +395,69 @@ def run_thesis_v2_resolve(thesis_id: str, outcome: bool) -> dict:
     return rec
 
 
+# ------------------------------------------------------------------ Events (Form 4, 8-K, earnings, gaps)
+def run_events(lookback_days: int = 45) -> dict:
+    from datetime import timedelta
+    from .data import edgar_events as EE, finnhub as FH
+    from .engines import events as events_engine
+    init_db()
+    t0 = time.time()
+    since = date.today() - timedelta(days=lookback_days)
+    with session_scope() as s:
+        companies = {c.ticker: {"ticker": c.ticker, "name": c.name, "sector": c.sector, "cik": c.cik} for c in s.execute(select(Company)).scalars() if c.cik}
+        known_f4 = {x[0] for x in s.execute(select(InsiderTransaction.accession).distinct())}
+        known_8k = {x[0] for x in s.execute(select(FilingEvent.accession))}
+    log(f"events: scanning EDGAR for {len(companies)} companies (Form 4 + 8-K since {since})")
+    new_tx, new_8k, n_f4 = [], [], 0
+    for i, (t, c) in enumerate(companies.items(), 1):
+        try:
+            f4s = EE.recent_filings(c["cik"], ("4", "4/A"), since)
+            for f in f4s:
+                if f["accession"] in known_f4:
+                    continue
+                for tx in EE.form4_transactions(c["cik"], f):
+                    new_tx.append({**tx, "ticker": t})
+                known_f4.add(f["accession"]); n_f4 += 1
+            for f in EE.recent_filings(c["cik"], ("8-K", "8-K/A"), since):
+                if f["accession"] not in known_8k:
+                    new_8k.append({"accession": f["accession"], "ticker": t, "form": f["form"], "filed": f["filed"], "items": f["items"] or "", "url": f["url"]})
+                    known_8k.add(f["accession"])
+        except Exception as e:
+            log(f"events: {t}: {e}")
+        if i % 40 == 0:
+            log(f"events: {i}/{len(companies)} companies, {n_f4} new Form 4s so far")
+    with session_scope() as s:
+        for tx in new_tx:
+            s.add(InsiderTransaction(accession=tx["accession"], ticker=tx["ticker"], filed=date.fromisoformat(tx["filed"]), date=date.fromisoformat(tx["date"][:10]),
+                                     code=tx["code"] or "?", acquired=tx["acquired"], shares=tx["shares"], price=tx["price"], value=tx["value"], owner=tx["owner"][:120],
+                                     title=(tx["title"] or "")[:120], is_director=tx["is_director"], is_officer=tx["is_officer"], is_ten_pct=tx["is_ten_pct"],
+                                     rule_10b5_1=tx["rule_10b5_1"], shares_after=tx["shares_after"], url=tx["url"][:300]))
+        for f in new_8k:
+            s.merge(FilingEvent(accession=f["accession"], ticker=f["ticker"], form=f["form"], filed=date.fromisoformat(f["filed"]), items=f["items"][:120], url=f["url"][:300]))
+    with session_scope() as s:
+        txs = [{"ticker": x.ticker, "filed": x.filed, "date": x.date, "code": x.code, "acquired": x.acquired, "shares": x.shares, "price": x.price, "value": x.value,
+                "owner": x.owner, "title": x.title, "is_director": x.is_director, "is_officer": x.is_officer, "is_ten_pct": x.is_ten_pct, "rule_10b5_1": x.rule_10b5_1, "url": x.url}
+               for x in s.execute(select(InsiderTransaction).where(InsiderTransaction.date >= since)).scalars()]
+        fils = [{"ticker": x.ticker, "form": x.form, "filed": x.filed.isoformat(), "items": x.items, "url": x.url}
+                for x in s.execute(select(FilingEvent).where(FilingEvent.filed >= since)).scalars()]
+    log(f"events: {len(new_tx)} new insider transactions from {n_f4} Form 4s, {len(new_8k)} new 8-Ks; {len(txs)} transactions and {len(fils)} 8-Ks in window")
+    holdings = {h["ticker"] for h in (load_prior("portfolio") or {}).get("holdings", [])}
+    earnings = FH.earnings_calendar(date.today() - timedelta(days=3), date.today() + timedelta(days=7))
+    quotes = {}
+    if FH._key():
+        watch = sorted(holdings | {t for t in companies if any(e.get("symbol") == t for e in earnings)})[:80]
+        for t in watch:
+            q = FH.quote(t)
+            if q:
+                quotes[t] = q
+    out = events_engine.compute(companies, txs, fils, earnings, quotes, holdings, date.today())
+    with session_scope() as s:
+        s.add(Snapshot(run_id=f"ev-{datetime.now().strftime('%Y%m%d-%H%M%S')}", kind="events", key="", as_of=date.today(), payload=out))
+    log(f"events: tape {len(out['tape'])} names; cluster buys {[x['ticker'] for x in out['insider']['cluster_buys']]}; "
+        f"high-severity 8-Ks {[x['ticker'] for x in out['filings']['high']]}; gaps {len(out['gaps'])}; earnings today {len(out['earnings']['today'])} ({time.time() - t0:.0f}s)")
+    return out
+
+
 def run_attention() -> dict:
     """Attention Engine: Wikipedia / Stocktwits / app charts / GitHub / autocomplete -> attention snapshot."""
     from .engines import attention as attention_engine
@@ -475,7 +542,8 @@ def compute_all(frames: dict, as_of: date, use_llm: bool, llm_top_n: Optional[in
     portfolio = portfolio_engine.compute(strategies, analyses, scores, companies, risk, flows, regime, themes_by_id,
                                          prior_pf, settings.portfolio_value, as_of, prior_flows,
                                          technicals=technicals, longterm=longterm, attention=attention, briefs=load_briefs(5),
-                                         rotation_history=rotation_history, hfe_ranking=load_prior("thesis_v2_opportunities"))
+                                         rotation_history=rotation_history, hfe_ranking=load_prior("thesis_v2_opportunities"),
+                                         events=load_prior("events"))
     log(f"engine: portfolio = {portfolio['stats']['positions']} positions, equity {portfolio['equity_weight']:.0%} (cap {portfolio['equity_cap']:.0%}, "
         f"cash {portfolio['cash_weight']:.0%}), {len(portfolio['trades'])} trades, {len(portfolio['exits'])} exits, "
         f"{len(portfolio['rejected_technical'])} rejected by the technical gate" + (" (initial)" if portfolio["is_initial"] else ""))
@@ -578,7 +646,7 @@ def run(limit: Optional[int] = None, skip_ingest: bool = False, use_llm: bool = 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["run", "ingest", "brief", "morning", "attention", "longterm", "thesis-v2"])
+    ap.add_argument("cmd", choices=["run", "ingest", "brief", "morning", "attention", "longterm", "thesis-v2", "events"])
     ap.add_argument("--new", type=str, default=None, help="thesis-v2: statement of a new thesis")
     ap.add_argument("--update", type=str, default=None, help="thesis-v2: id to review, or 'all'")
     ap.add_argument("--resolve", type=str, default=None, help="thesis-v2: 'T-001:true|false'")
@@ -593,6 +661,9 @@ def main() -> None:
     a = ap.parse_args()
     if a.cmd == "attention":
         run_attention()
+        return
+    if a.cmd == "events":
+        run_events()
         return
     if a.cmd == "longterm":
         run_longterm(use_llm=not a.no_llm)
@@ -620,6 +691,10 @@ def main() -> None:
             run_attention()
         except Exception as e:
             log(f"attention: failed ({e}); continuing")
+        try:
+            run_events()
+        except Exception as e:
+            log(f"events: failed ({e}); continuing")
         run_brief(use_llm=not a.no_llm)
         try:
             run_longterm_if_due(use_llm=not a.no_llm)

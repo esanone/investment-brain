@@ -106,3 +106,37 @@ class AttentionObservation(Base):
     metric: Mapped[str] = mapped_column(String(30), primary_key=True)
     date: Mapped[date] = mapped_column(Date, primary_key=True)
     value: Mapped[float] = mapped_column(Float)
+
+
+class InsiderTransaction(Base):
+    """Form 4 non-derivative transactions (open-market buys 'P' and sales 'S' are the informative ones)."""
+    __tablename__ = "insider_transactions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    accession: Mapped[str] = mapped_column(String(25), index=True)
+    ticker: Mapped[str] = mapped_column(String(12), index=True)
+    filed: Mapped[date] = mapped_column(Date)
+    date: Mapped[date] = mapped_column(Date)
+    code: Mapped[str] = mapped_column(String(2))
+    acquired: Mapped[bool] = mapped_column(default=True)
+    shares: Mapped[float] = mapped_column(Float)
+    price: Mapped[float] = mapped_column(Float)
+    value: Mapped[float] = mapped_column(Float)
+    owner: Mapped[str] = mapped_column(String(120))
+    title: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    is_director: Mapped[bool] = mapped_column(default=False)
+    is_officer: Mapped[bool] = mapped_column(default=False)
+    is_ten_pct: Mapped[bool] = mapped_column(default=False)
+    rule_10b5_1: Mapped[bool] = mapped_column(default=False)
+    shares_after: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    url: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+
+
+class FilingEvent(Base):
+    """8-K filings with their item codes."""
+    __tablename__ = "filing_events"
+    accession: Mapped[str] = mapped_column(String(25), primary_key=True)
+    ticker: Mapped[str] = mapped_column(String(12), index=True)
+    form: Mapped[str] = mapped_column(String(10))
+    filed: Mapped[date] = mapped_column(Date, index=True)
+    items: Mapped[str] = mapped_column(String(120))
+    url: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)

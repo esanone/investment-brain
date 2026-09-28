@@ -142,7 +142,7 @@ def tag_headlines(headlines: list[dict], tickers: dict[str, str]) -> list[dict]:
 
 
 def build(regime: Optional[dict], flows: Optional[dict], portfolio: Optional[dict], prior_brief: Optional[dict],
-          companies: dict[str, dict], use_llm: bool = True, hours: int = 36, attention: Optional[dict] = None) -> dict:
+          companies: dict[str, dict], use_llm: bool = True, hours: int = 36, attention: Optional[dict] = None, events: Optional[dict] = None) -> dict:
     raw, status = news.fetch_all(hours=hours)
     tickers = {t: c["name"] for t, c in companies.items()} or {t: v[0] for t, v in COMPANIES.items()}
     headlines = tag_headlines(raw, tickers)
@@ -188,6 +188,7 @@ def build(regime: Optional[dict], flows: Optional[dict], portfolio: Optional[dic
                                        for h in (portfolio or {}).get("holdings", [])],
                 "yesterday": {k: (prior_brief or {}).get("llm", {}).get(k) for k in ("summary", "market_thesis", "watch_today")} if prior_brief and prior_brief.get("llm") else None,
                 "public_attention": attention,   # what people are searching/watching/installing (Attention engine), for the human-behaviour read
+                "events_tape": events,           # insider cluster buys, 8-K material events, earnings today, pre-market gaps (Events engine)
             }
             out = _call(BRIEF_SYSTEM, pkg, BRIEF_SCHEMA, "brief")
             if out:

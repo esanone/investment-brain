@@ -7,6 +7,7 @@ import {
   ATTENTION_SOURCE_LABELS,
   COMPONENT_LABELS,
   EPISTEMIC_LABELS,
+  INSIDER_SIGNAL_LABELS,
   bps,
   date,
   money,
@@ -25,6 +26,8 @@ import {
 import { AnalyzeTicker } from "@/components/AnalyzeTicker";
 import { AttentionFlags } from "@/components/AttentionFlags";
 import { EmptyState } from "@/components/EmptyState";
+import { EventFlagChips, SeverityChip } from "@/components/EventFlagChips";
+import { InsiderTxTable } from "@/components/InsiderTxTable";
 import { StageChip } from "@/components/HoldingsTable";
 import { Meter } from "@/components/Meter";
 import { PageHeader } from "@/components/PageHeader";
@@ -121,6 +124,11 @@ export default async function CompanyPage({ params }: { params: Promise<{ ticker
   const { company, scores, strategist: st, fundamentals: f, on_demand, analyzed_at } = res.data;
   const att = res.data.attention ?? null;
   const ta = res.data.technical ?? null;
+  const ev = res.data.events ?? null;
+  const evInsider = ev?.insider ?? null;
+  const evBuys = evInsider ? (evInsider.recent_buys?.length ? evInsider.recent_buys : evInsider.notable_buys ?? []) : [];
+  const evFilings = ev?.filings ?? [];
+  const evGap = ev?.gap ?? null;
   // On-demand rows are scored against the latest run's universe; show which one.
   const runAsOf = on_demand ? await api.runs().then((r) => (r.ok && r.data[0] ? date(r.data[0].as_of) : null)) : null;
   const L = f?.latest ?? {};
@@ -298,6 +306,85 @@ export default async function CompanyPage({ params }: { params: Promise<{ ticker
                 <KV label="History" value={att.st_history_days === null || att.st_history_days === undefined ? "—" : `${num(att.st_history_days, 0)} days`} />
               </div>
             </div>
+          </Section>
+        </div>
+      )}
+
+      {/* Events */}
+      {ev && (
+        <div className="mb-4">
+          <Section
+            title="Events"
+            subtitle={
+              <Link href="/events" className="hover:text-accent">
+                Insider transactions, 8-K filings and pre-market gaps from the latest events tape
+              </Link>
+            }
+            actions={<EventFlagChips flags={ev.flags} />}
+            flush
+          >
+            <div className="grid gap-x-8 gap-y-4 px-4 py-3 md:grid-cols-3">
+              <div>
+                <div className="eyebrow mb-1">Insider</div>
+                {evInsider ? (
+                  <>
+                    <KV
+                      label="Signal"
+                      value={INSIDER_SIGNAL_LABELS[evInsider.signal] ?? evInsider.signal}
+                      cls={evInsider.signal === "heavy_selling" ? "text-neg" : evInsider.signal === "none" ? "text-muted" : "text-pos"}
+                    />
+                    <KV label="Buyers 14d" value={num(evInsider.n_buyers_14d, 0)} />
+                    <KV label="Bought 45d" value={money(evInsider.buy_usd_45d)} />
+                    <KV label="Sold 45d" value={money(evInsider.sell_usd_45d)} />
+                    <KV label="Net 45d" value={money(evInsider.net_usd_45d)} cls={signClass(evInsider.net_usd_45d)} />
+                  </>
+                ) : (
+                  <div className="text-[12.5px] text-muted">No open-market insider activity in the last 45 days.</div>
+                )}
+              </div>
+              <div>
+                <div className="eyebrow mb-1">8-K filings</div>
+                {evFilings.length ? (
+                  <ul className="flex flex-col gap-1.5 text-[12.5px]">
+                    {evFilings.map((f, i) => (
+                      <li key={`${f.filed}-${i}`} className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span className="mono text-muted">{date(f.filed)}</span>
+                        <SeverityChip severity={f.severity} />
+                        <span className="min-w-0 flex-1">{f.labels?.length ? f.labels.join(", ") : f.items?.join(", ") || "—"}</span>
+                        {f.url && (
+                          <a href={f.url} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+                            8-K
+                          </a>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="text-[12.5px] text-muted">No 8-K in the lookback window.</div>
+                )}
+              </div>
+              <div>
+                <div className="eyebrow mb-1">Pre-market gap</div>
+                {evGap ? (
+                  <>
+                    <KV label="Gap" value={ptsSigned(evGap.gap_pct, 1)} cls={signClass(evGap.gap_pct)} />
+                    <KV label="Prev close" value={fmtPrice(evGap.prev_close)} />
+                    <KV label="Last" value={fmtPrice(evGap.last)} />
+                    {evGap.earnings && (
+                      <KV label="Earnings surprise" value={ptsSigned(evGap.earnings.surprise_pct, 1)} cls={signClass(evGap.earnings.surprise_pct)} />
+                    )}
+                  </>
+                ) : (
+                  <div className="text-[12.5px] text-muted">No gap of 4% or more in the pre-market quotes.</div>
+                )}
+              </div>
+            </div>
+            {evBuys.length > 0 && (
+              <div className="border-t border-line">
+                <div className="eyebrow px-4 pt-3 pb-1.5">Recent insider buys</div>
+                <InsiderTxTable rows={evBuys} />
+              </div>
+            )}
           </Section>
         </div>
       )}

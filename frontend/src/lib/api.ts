@@ -4,6 +4,7 @@ import type {
   BriefHistoryRow,
   CompanyDetail,
   CompanyRow,
+  Events,
   Flows,
   Health,
   Overview,
@@ -147,6 +148,10 @@ export const api = {
   attention: () => get<Attention>("/api/attention"),
   /** Kick off an attention refresh in the background; poll /api/health `running_attention` until false. */
   runAttention: () => post<{ started: boolean; reason?: string }>("/api/attention/run"),
+  /** Latest events tape (insider buys, 8-Ks, earnings, gaps). 404s with "No events tape yet" until the engine has run. */
+  events: () => get<Events>("/api/events"),
+  /** Kick off an events refresh in the background; poll /api/health `running_events` until false. */
+  runEvents: () => post<{ started: boolean; reason?: string }>("/api/events/run"),
   /** Latest long-term thesis. 404s with "No long-term thesis yet" until the morning run has built one. */
   thesis: () => get<Thesis>("/api/thesis"),
   /** Per-build thesis summaries, newest first (empty list until one has been built). */

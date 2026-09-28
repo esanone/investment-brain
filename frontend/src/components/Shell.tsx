@@ -10,6 +10,7 @@ const NAV = [
   { href: "/thesis", label: "Thesis" },
   { href: "/thesis-v2", label: "Human Futures Engine" },
   { href: "/attention", label: "Attention" },
+  { href: "/events", label: "Events" },
   { href: "/regime", label: "Regime" },
   { href: "/flows", label: "Flows" },
   { href: "/themes", label: "Themes" },

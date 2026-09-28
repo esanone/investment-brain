@@ -6,6 +6,7 @@ import { CompanyRowsTable } from "@/components/CompanyRowsTable";
 import { DirectionChip } from "@/components/DirectionChip";
 import { DivergingBar } from "@/components/DivergingBar";
 import { EmptyState } from "@/components/EmptyState";
+import { EventFlagChips } from "@/components/EventFlagChips";
 import { Meter } from "@/components/Meter";
 import { PageHeader } from "@/components/PageHeader";
 import { REGIME_COLORS } from "@/components/ProbabilityChart";
@@ -19,13 +20,14 @@ export * from "@/lib/segment-config";
 const TREND_GLYPH: Record<string, string> = { accelerating: "▲", steady: "→", decelerating: "▼" };
 
 export default async function DashboardPage() {
-  const [ov, health, briefRes, attRes, thesisRes, oppRes] = await Promise.all([
+  const [ov, health, briefRes, attRes, thesisRes, oppRes, eventsRes] = await Promise.all([
     api.overview(),
     api.health(),
     api.brief(),
     api.attention(),
     api.thesis(),
     api.thesisV2Opportunities(),
+    api.events(),
   ]);
   const running = health.ok ? health.data.running : false;
   // Morning brief card is optional: nothing renders until a brief has been generated.
@@ -48,6 +50,10 @@ export default async function DashboardPage() {
     .sort((a, b) => (b.score ?? -Infinity) - (a.score ?? -Infinity))
     .slice(0, 5);
   const oppWatch = oppCandidates.filter((c) => c.buy_readiness === "watch").length;
+  // Events card is optional: nothing renders until the events tape has been built.
+  const events = eventsRes.ok ? eventsRes.data : null;
+  // The tape is already sorted portfolio-first then by priority; keep that order.
+  const eventsTop = [...(events?.tape ?? [])].sort((a, b) => Number(b.in_portfolio) - Number(a.in_portfolio) || b.priority - a.priority).slice(0, 6);
 
   if (!ov.ok) {
     return (
@@ -166,6 +172,42 @@ export default async function DashboardPage() {
             </div>
             <div className="mt-2 text-[12px]">
               <Link href="/attention" className="text-accent hover:underline">Open the attention page</Link>
+            </div>
+          </Section>
+        )}
+
+        {/* EVENTS */}
+        {events && (
+          <Section
+            title="Events"
+            subtitle={
+              <Link href="/events" className="hover:text-accent">
+                as of {events.as_of} · {events.tape?.length ?? 0} on the tape · {(events.insider?.cluster_buys?.length ?? 0) + (events.insider?.notable_buys?.length ?? 0)} insider buys ·{" "}
+                {events.filings?.high?.length ?? 0} high-severity 8-K · {events.gaps?.length ?? 0} gaps
+              </Link>
+            }
+            className="lg:col-span-5"
+          >
+            {eventsTop.length ? (
+              <ul className="flex flex-col gap-1 text-[12.5px]">
+                {eventsTop.map((r) => (
+                  <li key={r.ticker} className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <Link href={`/companies/${r.ticker}`} className="min-w-0 flex-1 truncate hover:text-accent">
+                      <span className="mono font-medium">{r.ticker}</span> <span className="text-muted">{r.name}</span>
+                      {r.in_portfolio && <span className="ml-1.5 text-[11px] text-accent">portfolio</span>}
+                    </Link>
+                    <span className="hidden max-w-md truncate text-[11.5px] text-muted sm:inline-block" title={r.headline}>
+                      {r.headline}
+                    </span>
+                    <EventFlagChips flags={r.flags} max={3} />
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="text-[12.5px] text-muted">Nothing on the tape today.</div>
+            )}
+            <div className="mt-2 text-[12px]">
+              <Link href="/events" className="text-accent hover:underline">Open the events page</Link>
             </div>
           </Section>
         )}

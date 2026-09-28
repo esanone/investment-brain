@@ -28,6 +28,8 @@ export interface Health {
   running_attention?: boolean;
   /** True while a Thesis v2 analysis or monthly update (POST /api/thesis-v2[/{id}/update]) is in flight. Absent on older backends. */
   running_thesis_v2?: boolean;
+  /** True while an events refresh (POST /api/events/run) is in flight. Absent on older backends. */
+  running_events?: boolean;
 }
 
 // ---------------------------------------------------------------- regime
@@ -406,6 +408,8 @@ export interface CompanyDetail {
   attention?: CompanyAttention | null;
   /** Trend-template read from the weekly run; null/absent when there were not enough price bars. */
   technical?: CompanyTechnical | null;
+  /** Event triggers (insider buys, 8-Ks, gaps) for this ticker from the latest events tape; null/absent when nothing fired. */
+  events?: EventTrigger | null;
 }
 
 /** Criterion keys of the Minervini-style trend template (technicals.py `trend_template`). */
@@ -1494,4 +1498,129 @@ export interface ThesisV2Opportunities {
   method: string;
   /** LLM rationale for the top candidates; absent when the LLM is off or the call failed. */
   memo?: ThesisV2Memo | null;
+}
+
+// ---------------------------------------------------------------- events
+/**
+ * Payloads of backend/brain/engines/events.py `compute()`, served by /api/events
+ * (404 "No events tape yet" until `python -m brain.pipeline events` has run) and
+ * embedded per ticker as `events` in /api/companies/{ticker}.
+ */
+export type EventFlag =
+  | "insider_cluster_buy"
+  | "insider_notable_buy"
+  | "8k_high_severity"
+  | "officer_change"
+  | "results_filed"
+  | "earnings_today"
+  | "gap_up"
+  | "gap_down";
+
+export type FilingSeverity = "high" | "medium" | "info" | "low" | "none";
+
+/** One open-market insider transaction (Form 4). */
+export interface InsiderTx {
+  date: string;
+  owner: string;
+  title: string | null;
+  shares: Num;
+  price: Num;
+  value: Num;
+  url: string | null;
+}
+
+export type InsiderSignalKind = "cluster_buy" | "notable_buy" | "buying" | "heavy_selling" | "none";
+
+export interface InsiderSignal {
+  signal: InsiderSignalKind | string;
+  cluster_buy: boolean;
+  n_buyers_14d: number;
+  buy_usd_45d: Num;
+  sell_usd_45d: Num;
+  net_usd_45d: Num;
+  notable_buys: InsiderTx[];
+  recent_buys: InsiderTx[];
+  top_sells: InsiderTx[];
+}
+
+export interface InsiderRow extends InsiderSignal {
+  ticker: string;
+  name: string;
+}
+
+export interface HeavySellingRow {
+  ticker: string;
+  name: string;
+  sell_usd_45d: Num;
+  top_sells: InsiderTx[];
+}
+
+export interface FilingItem {
+  filed: string;
+  /** 8-K item codes, e.g. "5.02". */
+  items: string[];
+  labels: string[];
+  severity: FilingSeverity | string;
+  url: string | null;
+}
+
+export interface FilingRow extends FilingItem {
+  ticker: string;
+  name: string;
+}
+
+/** Finnhub earnings-calendar row (all fields optional/nullable in the feed). */
+export interface EarningsEvent {
+  symbol: string;
+  date: string;
+  hour?: string | null;
+  epsActual?: Num;
+  epsEstimate?: Num;
+  revenueActual?: Num;
+  revenueEstimate?: Num;
+  /** (actual − estimate) / |estimate| in percent points; set only on reported rows. */
+  surprise_pct?: Num;
+}
+
+export interface EventGap {
+  ticker: string;
+  name: string | null;
+  /** Percent points vs the previous close. */
+  gap_pct: Num;
+  prev_close: Num;
+  last: Num;
+  in_portfolio: boolean;
+  earnings: EarningsEvent | null;
+  insider: string | null;
+  filings: FilingItem[];
+}
+
+export interface EventTrigger {
+  flags: EventFlag[];
+  insider: InsiderSignal | null;
+  filings: FilingItem[];
+  gap: EventGap | null;
+}
+
+export interface TapeRow {
+  ticker: string;
+  name: string;
+  sector: string | null;
+  in_portfolio: boolean;
+  flags: EventFlag[];
+  priority: number;
+  headline: string;
+}
+
+export interface Events {
+  as_of: string;
+  rules: { cluster_days: number; cluster_min_insiders: number; notable_buy_usd: number; lookback_days: number; gap_pct: number } & Record<string, number>;
+  sources: { form4: number; "8k": number; earnings_calendar: number; quotes: number } & Record<string, number>;
+  tape: TapeRow[];
+  triggers: Record<string, EventTrigger>;
+  insider: { cluster_buys: InsiderRow[]; notable_buys: InsiderRow[]; heavy_selling: HeavySellingRow[] };
+  filings: { high: FilingRow[]; medium: FilingRow[]; results: FilingRow[] };
+  earnings: { today: EarningsEvent[]; this_week: EarningsEvent[]; reported: EarningsEvent[] };
+  gaps: EventGap[];
+  method: string;
 }

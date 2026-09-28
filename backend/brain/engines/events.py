@@ -16,10 +16,16 @@ from .common import r
 RULES = {"cluster_days": 14, "cluster_min_insiders": 2, "notable_buy_usd": 250_000, "lookback_days": 45, "gap_pct": 4.0}
 
 
+def _row(x: dict) -> dict:
+    return {"date": str(x["date"])[:10], "owner": x["owner"], "title": x["title"], "shares": x["shares"], "price": x["price"], "value": r(x["value"], 0), "url": x["url"]}
+
+
 def insider_signals(transactions: list[dict], today: date) -> dict[str, dict]:
     """transactions: rows for the universe (last 45 days). -> {ticker: {cluster_buy, notable_buys[], buys[], sells[], net_buy_usd, ...}}"""
     by_t: dict[str, list[dict]] = {}
     for tx in transactions:
+        if isinstance(tx.get("date"), str):
+            tx["date"] = date.fromisoformat(tx["date"][:10])
         by_t.setdefault(tx["ticker"], []).append(tx)
     out = {}
     cutoff = today - timedelta(days=RULES["cluster_days"])
@@ -34,9 +40,9 @@ def insider_signals(transactions: list[dict], today: date) -> dict[str, dict]:
         signal = "cluster_buy" if cluster else "notable_buy" if notable else "buying" if recent_buys else ("heavy_selling" if sum(x["value"] for x in sells) > 5e6 else "none")
         out[t] = {"signal": signal, "cluster_buy": cluster, "n_buyers_14d": len(insiders), "buy_usd_45d": r(sum(x["value"] for x in buys), 0),
                   "sell_usd_45d": r(sum(x["value"] for x in sells), 0), "net_usd_45d": r(net, 0),
-                  "notable_buys": [{k: x[k] for k in ("date", "owner", "title", "shares", "price", "value", "url")} for x in sorted(notable, key=lambda z: -z["value"])[:5]],
-                  "recent_buys": [{k: x[k] for k in ("date", "owner", "title", "shares", "price", "value", "url")} for x in sorted(recent_buys, key=lambda z: z["date"], reverse=True)[:8]],
-                  "top_sells": [{k: x[k] for k in ("date", "owner", "title", "shares", "price", "value", "url")} for x in sorted(sells, key=lambda z: -z["value"])[:3]]}
+                  "notable_buys": [_row(x) for x in sorted(notable, key=lambda z: -z["value"])[:5]],
+                  "recent_buys": [_row(x) for x in sorted(recent_buys, key=lambda z: z["date"], reverse=True)[:8]],
+                  "top_sells": [_row(x) for x in sorted(sells, key=lambda z: -z["value"])[:3]]}
     return out
 
 

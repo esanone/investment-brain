@@ -190,3 +190,24 @@ export const BECOMES_LABELS: Record<string, string> = {
   loses_pricing_power: "loses pricing power",
   gains_pricing_power: "gains pricing power",
 };
+
+/** Human labels for the events-engine tape flags (events.py `compute`). */
+export const EVENT_FLAG_LABELS: Record<string, string> = {
+  insider_cluster_buy: "insider cluster buy",
+  insider_notable_buy: "insider buy",
+  "8k_high_severity": "8-K high",
+  officer_change: "officer change",
+  results_filed: "results filed",
+  earnings_today: "earnings today",
+  gap_up: "gap up",
+  gap_down: "gap down",
+};
+
+/** Human labels for the events-engine insider signal kinds. */
+export const INSIDER_SIGNAL_LABELS: Record<string, string> = {
+  cluster_buy: "Cluster buy",
+  notable_buy: "Notable buy",
+  buying: "Buying",
+  heavy_selling: "Heavy selling",
+  none: "No signal",
+};

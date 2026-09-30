@@ -416,11 +416,31 @@ def run_thesis_v2_expand(max_add: int = 25) -> dict:
         if rec.get("expansions"):
             _save_thesis_v2(rec)
     log(f"thesis-v2: added {len(added)} companies ({', '.join(n['ticker'] for n in added)}); skipped {len(skipped)}: " + "; ".join(f"{x['ticker']}: {x['reason'][:60]}" for x in skipped[:6]))
+    if added:
+        run_thesis_v2_remap()
     out = run_thesis_v2_opportunities()
     out["expansion"] = {"added": added, "skipped": skipped, "as_of": date.today().isoformat()}
     with session_scope() as s:
         s.add(Snapshot(run_id=f"t2x-{datetime.now().strftime('%Y%m%d-%H%M%S')}", kind="thesis_v2_expansion", key="", as_of=date.today(), payload=out["expansion"]))
     return out
+
+
+def run_thesis_v2_remap() -> int:
+    """Re-map every open thesis's value pools over the current universe (Sonnet, one call per thesis)."""
+    from .engines import causal
+    init_db()
+    with session_scope() as s:
+        universe = [{"ticker": c.ticker, "name": c.name, "sector": c.sector, "industry": c.industry} for c in s.execute(select(Company)).scalars()]
+    n = 0
+    for tid, rec in _thesis_v2_records().items():
+        if rec.get("status") != "open":
+            continue
+        before = sum(len(vp.get("tickers", [])) for vp in rec.get("value_pools", []))
+        rec = causal.remap_pools(rec, universe)
+        after = sum(len(vp.get("tickers", [])) for vp in rec.get("value_pools", []))
+        _save_thesis_v2(rec); n += 1
+        log(f"thesis-v2: {tid} pools re-mapped over {len(universe)} names: {before} -> {after} ticker slots")
+    return n
 
 
 def run_thesis_v2_resolve(thesis_id: str, outcome: bool) -> dict:
@@ -692,6 +712,7 @@ def main() -> None:
     ap.add_argument("--from-briefs", action="store_true", help="thesis-v2: consolidate the briefs' long-term bullets into theses, analyse, rank stocks")
     ap.add_argument("--opportunities", action="store_true", help="thesis-v2: re-rank stocks from the current ledger")
     ap.add_argument("--expand", action="store_true", help="thesis-v2: theme-driven universe expansion from the theses' value pools")
+    ap.add_argument("--remap", action="store_true", help="thesis-v2: re-map value pools over the current universe, then re-rank")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--skip-ingest", action="store_true")
     ap.add_argument("--no-llm", action="store_true")
@@ -708,7 +729,9 @@ def main() -> None:
         run_longterm(use_llm=not a.no_llm)
         return
     if a.cmd == "thesis-v2":
-        if a.expand:
+        if a.remap:
+            run_thesis_v2_remap(); run_thesis_v2_opportunities()
+        elif a.expand:
             run_thesis_v2_expand()
         elif a.from_briefs:
             run_thesis_v2_from_briefs()

@@ -360,7 +360,7 @@ def opportunities(records: list[dict], company_rows: dict[str, dict], technicals
     rows.sort(key=lambda z: -z["score"])
     losers = sorted([z for z in rows if z["headwind"] < -0.3], key=lambda z: z["headwind"])[:12]
     return {"as_of": date.today().isoformat(), "generated_at": datetime.now().isoformat(timespec="seconds"),
-            "n_theses": sum(1 for rc in records if rc.get("status") == "open"), "candidates": rows[:40], "losers": losers,
+            "n_theses": sum(1 for rc in records if rc.get("status") == "open"), "candidates": rows[:80], "losers": losers,
             "method": "Thesis exposure = sum over open theses of posterior x value-pool weight (mandatory infrastructure 1.0, pricing power / scarce 0.9, "
                       "abundant -0.3, new risk -0.6, loses pricing power -1.0). Final = exposure x (0.5 + opportunity/100) x (1 + gap/100) x technical "
                       "readiness (trend template) x attention (not-priced +15%, crowded -20%). 'ready' = passes the book's entry gate today."}
@@ -403,3 +403,28 @@ def nominate_expansions(records: list[dict], universe_tickers: set[str]) -> list
         if t and t not in universe_tickers and t not in seen:
             seen.add(t); res.append({**n, "ticker": t})
     return res
+
+
+# ------------------------------------------------------------------ re-map value pools over the (enlarged) universe
+REMAP_SCHEMA = {"type": "object", "properties": {"pools": {"type": "array", "items": {"type": "object", "properties": {
+    "layer": {"type": "string"}, "tickers": {"type": "array", "items": {"type": "string"}}}, "required": ["layer", "tickers"], "additionalProperties": False}}},
+    "required": ["pools"], "additionalProperties": False}
+REMAP_SYSTEM = (
+    "You map a thesis's value pools to the companies in a given universe. For EACH pool (keep the layer text exactly as given), list every "
+    "universe ticker with direct, material exposure to that layer; be consistent across pools and do not omit obvious fits. Only use tickers "
+    "from the universe list. No disclaimers. Return only the JSON object requested.")
+
+
+def remap_pools(record: dict, universe: list[dict]) -> dict:
+    pools = [{"layer": vp["layer"], "emerging_need": vp.get("emerging_need"), "becomes": vp.get("becomes")} for vp in record.get("value_pools", [])]
+    out = _call(REMAP_SYSTEM, {"thesis": record.get("formalized", {}).get("statement"), "pools": pools, "universe": universe}, REMAP_SCHEMA, "thesis_v2_remap", tier="bulk")
+    if not out:
+        return record
+    allowed = {u["ticker"] for u in universe}
+    by_layer = {p["layer"]: [t for t in p.get("tickers", []) if t in allowed] for p in out.get("pools", [])}
+    for vp in record.get("value_pools", []):
+        new = by_layer.get(vp["layer"])
+        if new:
+            vp["tickers"] = sorted(set(new) | set(vp.get("tickers", [])) if len(new) < 3 else set(new))
+    record["pools_remapped"] = date.today().isoformat()
+    return record

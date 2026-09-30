@@ -385,6 +385,44 @@ def run_thesis_v2_opportunities(use_llm: bool = True) -> dict:
     return out
 
 
+def run_thesis_v2_expand(max_add: int = 25) -> dict:
+    """Theme-driven universe expansion: the engine nominates 10-K filers outside the universe for each thesis's value
+    pools; each is pulled in via the on-demand path, attached to the pool, and the ranking reruns."""
+    from .engines import causal
+    from . import ondemand
+    init_db()
+    records = list(_thesis_v2_records().values())
+    with session_scope() as s:
+        universe = {c.ticker for c in s.execute(select(Company)).scalars()}
+    log(f"thesis-v2: asking for value-pool nominees outside the {len(universe)}-name universe")
+    nominees = causal.nominate_expansions(records, universe)
+    log(f"thesis-v2: {len(nominees)} nominees: " + ", ".join(n["ticker"] for n in nominees))
+    added, skipped = [], []
+    by_id = {r["id"]: r for r in records}
+    for n in nominees[:max_add]:
+        t = n["ticker"]
+        try:
+            ondemand.analyze(t)
+            added.append(n)
+            rec = by_id.get(n["thesis_id"])
+            if rec:
+                for vp in rec.get("value_pools", []):
+                    if vp["layer"] == n["layer"] and t not in vp.get("tickers", []):
+                        vp.setdefault("tickers", []).append(t)
+                rec.setdefault("expansions", []).append({"ticker": t, "name": n["name"], "layer": n["layer"], "why": n["why"], "added": date.today().isoformat()})
+        except Exception as e:
+            skipped.append({"ticker": t, "reason": str(e)[:160]})
+    for rec in by_id.values():
+        if rec.get("expansions"):
+            _save_thesis_v2(rec)
+    log(f"thesis-v2: added {len(added)} companies ({', '.join(n['ticker'] for n in added)}); skipped {len(skipped)}: " + "; ".join(f"{x['ticker']}: {x['reason'][:60]}" for x in skipped[:6]))
+    out = run_thesis_v2_opportunities()
+    out["expansion"] = {"added": added, "skipped": skipped, "as_of": date.today().isoformat()}
+    with session_scope() as s:
+        s.add(Snapshot(run_id=f"t2x-{datetime.now().strftime('%Y%m%d-%H%M%S')}", kind="thesis_v2_expansion", key="", as_of=date.today(), payload=out["expansion"]))
+    return out
+
+
 def run_thesis_v2_resolve(thesis_id: str, outcome: bool) -> dict:
     from .engines import causal
     rec = _thesis_v2_records().get(thesis_id)
@@ -653,6 +691,7 @@ def main() -> None:
     ap.add_argument("--seed", action="store_true", help="thesis-v2: create T-001 (trusted delegation)")
     ap.add_argument("--from-briefs", action="store_true", help="thesis-v2: consolidate the briefs' long-term bullets into theses, analyse, rank stocks")
     ap.add_argument("--opportunities", action="store_true", help="thesis-v2: re-rank stocks from the current ledger")
+    ap.add_argument("--expand", action="store_true", help="thesis-v2: theme-driven universe expansion from the theses' value pools")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--skip-ingest", action="store_true")
     ap.add_argument("--no-llm", action="store_true")
@@ -669,7 +708,9 @@ def main() -> None:
         run_longterm(use_llm=not a.no_llm)
         return
     if a.cmd == "thesis-v2":
-        if a.from_briefs:
+        if a.expand:
+            run_thesis_v2_expand()
+        elif a.from_briefs:
             run_thesis_v2_from_briefs()
         elif a.opportunities:
             run_thesis_v2_opportunities(use_llm=not a.no_llm)
@@ -704,7 +745,7 @@ def main() -> None:
             try:
                 reviewed = run_thesis_v2_update()          # only theses not yet reviewed this calendar month
                 if reviewed:
-                    run_thesis_v2_opportunities()
+                    run_thesis_v2_expand()                 # nominees for the reviewed theses' value pools, then re-rank
             except Exception as e:
                 log(f"thesis-v2: monthly review failed ({e}); continuing")
         run(a.limit, a.skip_ingest, not a.no_llm, force_enrich=a.enrich)

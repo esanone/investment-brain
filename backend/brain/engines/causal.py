@@ -370,3 +370,36 @@ def opportunity_memo(top: list[dict], theses: list[dict]) -> Optional[dict]:
     pkg = {"candidates": top, "theses": [{"id": t["id"], "title": t.get("title"), "posterior": t.get("probability", {}).get("posterior"),
                                           "next_signal": t.get("indicators", {}).get("next_confirmation_signal")} for t in theses]}
     return _call(MEMO_SYSTEM, pkg, MEMO_SCHEMA, "thesis_v2_memo")
+
+
+# ------------------------------------------------------------------ theme-driven universe expansion
+EXPAND_SCHEMA = {
+    "type": "object",
+    "properties": {"nominees": {"type": "array", "items": {"type": "object", "properties": {
+        "ticker": {"type": "string", "description": "US-listed ticker of an SEC 10-K filer NOT in the universe"},
+        "name": {"type": "string"}, "thesis_id": {"type": "string"}, "layer": {"type": "string", "description": "the value-pool layer it belongs to (copy the layer text)"},
+        "why": {"type": "string"}}, "required": ["ticker", "name", "thesis_id", "layer", "why"], "additionalProperties": False}}},
+    "required": ["nominees"], "additionalProperties": False,
+}
+EXPAND_SYSTEM = (
+    "You are the Economic Intelligence of the Causal Futures Engine. For each thesis's value pools, nominate US-listed companies that "
+    "file 10-Ks with the SEC and are NOT already in the universe: the purest, most direct exposures to each pool (constraint owners, toll "
+    "roads, picks-and-shovels), including mid-caps the market may not associate with the theme yet. Skip foreign private issuers (20-F "
+    "filers), SPACs and pre-revenue names. 15-30 nominees total, no duplicates, each tied to one thesis and one layer. No disclaimers. "
+    "Return only the JSON object requested.")
+
+
+def nominate_expansions(records: list[dict], universe_tickers: set[str]) -> list[dict]:
+    pools = [{"thesis_id": rec["id"], "title": rec.get("title"), "posterior": rec.get("probability", {}).get("posterior"),
+              "value_pools": [{"layer": vp["layer"], "becomes": vp["becomes"], "already_in_universe": vp.get("tickers", [])} for vp in rec.get("value_pools", [])
+                              if vp.get("becomes") in ("mandatory_infrastructure", "gains_pricing_power", "scarce")]}
+             for rec in records if rec.get("status") == "open"]
+    out = _call(EXPAND_SYSTEM, {"theses": pools, "universe_tickers": sorted(universe_tickers)}, EXPAND_SCHEMA, "thesis_v2_expand")
+    if not out:
+        return []
+    seen, res = set(), []
+    for n in out.get("nominees", []):
+        t = (n.get("ticker") or "").upper().strip()
+        if t and t not in universe_tickers and t not in seen:
+            seen.add(t); res.append({**n, "ticker": t})
+    return res

@@ -176,7 +176,12 @@ def analyze(ticker: str) -> dict:
     exp = theme_engine.company_theme_exposure(graph, t)
     st = strategist.compute(company, a, scores[t], exp, themes_by_id, regime, flows)
     st["theme_exposures"] = exp
-    payload = {"company": company, "scores": scores[t], "strategist": st, "on_demand": True, "analyzed_at": date.today().isoformat(),
+    from .engines.technicals import trend_template
+    with session_scope() as s:
+        spy = pd.read_sql(select(Price).where(Price.symbol == "SPY"), s.connection())
+    spy["date"] = pd.to_datetime(spy["date"])
+    technical = trend_template(px, spy) if not px.empty else None
+    payload = {"company": company, "scores": scores[t], "strategist": st, "on_demand": True, "analyzed_at": date.today().isoformat(), "technical": technical,
                "fundamentals": {"latest": a["latest"], "history": a["history"], "valuation": a["valuation"], "momentum": a["momentum"],
                                 "price": a["price"], "data_quality": a["data_quality"]}}
     with session_scope() as s:

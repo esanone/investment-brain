@@ -206,6 +206,7 @@ INSTRUMENTS: dict[str, tuple[str, str, str | None]] = {
     # benchmark / breadth
     "SPY": ("S&P 500", "benchmark", None),
     "RSP": ("S&P 500 Equal Weight", "benchmark", None),
+    "QQQ": ("Nasdaq-100", "benchmark", None),
     "^VIX": ("CBOE Volatility Index", "benchmark", None),
     # sectors
     "XLK": ("Technology", "sector", "Technology"),

@@ -597,11 +597,32 @@ def compute_all(frames: dict, as_of: date, use_llm: bool, llm_top_n: Optional[in
     log(f"engine: portfolio (long-term mode; {sum(1 for v in technicals.values() if v['ready'])}/{len(technicals)} names pass the trend template; "
         f"long-term thesis {'from ' + longterm['as_of'] if longterm else 'not built yet'})")
     rotation_history = load_rotation_history(30)
+    from .universe import SECTOR_ETF
+    from .engines import pm as pm_engine
+    sector_medians: dict = {}
+    for sec in {c["sector"] for c in companies.values()}:
+        vals = {k: [analyses[t]["valuation"].get(k) for t in analyses if companies[t]["sector"] == sec and analyses[t]["valuation"].get(k)] for k in ("pe", "ev_ebitda", "ev_sales", "p_fcf")}
+        sector_medians[sec] = {k: float(pd.Series(v).median()) for k, v in vals.items() if len(v) >= 3}
+    ev_prior = load_prior("events") or {}
+    pm_inputs = {"prices": prices, "sector_etf": {sec: prices.get(etf) for sec, etf in SECTOR_ETF.items()}, "sector_medians": sector_medians,
+                 "earnings_week": ev_prior.get("earnings", {}).get("this_week", [])}
     portfolio = portfolio_engine.compute(strategies, analyses, scores, companies, risk, flows, regime, themes_by_id,
                                          prior_pf, settings.portfolio_value, as_of, prior_flows,
                                          technicals=technicals, longterm=longterm, attention=attention, briefs=load_briefs(5),
                                          rotation_history=rotation_history, hfe_ranking=load_prior("thesis_v2_opportunities"),
-                                         events=load_prior("events"))
+                                         events=load_prior("events"), pm_inputs=pm_inputs)
+    # per-company portfolio-management detail (entry score, expected return, momentum, catalysts) for the company pages
+    from .engines.portfolio import _pm_detail
+    hfe_c = {c["ticker"]: c for c in (load_prior("thesis_v2_opportunities") or {}).get("candidates", [])}
+    att_c = {c["ticker"]: c for c in (attention or {}).get("companies", [])}
+    pm_detail = {}
+    for t, a in analyses.items():
+        try:
+            pm_detail[t] = _pm_detail(t, a, strategies[t], scores[t], companies[t], technicals.get(t) or {}, pm_inputs, ev_prior, hfe_c.get(t), att_c.get(t), regime, flows, as_of)
+        except Exception as e:
+            log(f"pm: {t}: {e}")
+    log(f"engine: entry scores computed for {len(pm_detail)} names; attractive entries: "
+        + ", ".join(f"{t} {d['entry']['score']}" for t, d in sorted(pm_detail.items(), key=lambda x: -(x[1]['entry']['score'] or 0))[:8]))
     log(f"engine: portfolio = {portfolio['stats']['positions']} positions, equity {portfolio['equity_weight']:.0%} (cap {portfolio['equity_cap']:.0%}, "
         f"cash {portfolio['cash_weight']:.0%}), {len(portfolio['trades'])} trades, {len(portfolio['exits'])} exits, "
         f"{len(portfolio['rejected_technical'])} rejected by the technical gate" + (" (initial)" if portfolio["is_initial"] else ""))
@@ -653,7 +674,7 @@ def compute_all(frames: dict, as_of: date, use_llm: bool, llm_top_n: Optional[in
             log("llm: portfolio memo written")
 
     return {"regime": regime, "flows": flows, "themes": themes, "analyses": analyses, "scores": scores,
-            "strategies": strategies, "ranked": ranked, "risk": risk, "portfolio": portfolio, "technicals": technicals}
+            "strategies": strategies, "ranked": ranked, "risk": risk, "portfolio": portfolio, "technicals": technicals, "pm_detail": pm_detail}
 
 
 def persist(results: dict, frames: dict, as_of: date) -> str:
@@ -669,6 +690,7 @@ def persist(results: dict, frames: dict, as_of: date) -> str:
         for t, st in results["strategies"].items():
             a = results["analyses"][t]
             payload = {"as_of": as_of.isoformat(), "company": companies[t], "scores": results["scores"][t], "strategist": st, "technical": results.get("technicals", {}).get(t),
+                       "pm": results.get("pm_detail", {}).get(t),
                        "fundamentals": {"latest": a["latest"], "history": a["history"], "valuation": a["valuation"],
                                         "momentum": a["momentum"], "price": a["price"], "data_quality": a["data_quality"]}}
             s.add(Snapshot(run_id=run_id, kind="company", key=t, as_of=as_of, payload=payload))

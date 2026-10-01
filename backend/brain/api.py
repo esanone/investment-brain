@@ -59,6 +59,8 @@ def _company_row(p: dict) -> dict:
         "fcf_yield": f["valuation"].get("fcf_yield"), "pe": f["valuation"].get("pe"), "ev_sales": f["valuation"].get("ev_sales"),
         "return_3m": f["momentum"].get("return_3m"),
         "top_theme": st["theme_exposures"][0]["theme"] if st.get("theme_exposures") else None,
+        "entry_score": ((p.get("pm") or {}).get("entry") or {}).get("score"), "expected_return_pct": (((p.get("pm") or {}).get("expected_return")) or {}).get("expected_return_pct"),
+        "er_band": (((p.get("pm") or {}).get("expected_return")) or {}).get("band"),
     }
 
 

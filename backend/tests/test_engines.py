@@ -165,3 +165,27 @@ def test_events_engine_cluster_buy_and_severity():
     assert "8k_high_severity" in ins["D"]["flags"]
     assert out["tape"][0]["ticker"] == "A"                     # portfolio names first
     assert out["gaps"][0]["gap_pct"] == 10.0 and len(out["gaps"]) == 1
+
+
+def test_pm_expected_return_entry_score_and_clusters():
+    import numpy as np, pandas as pd
+    from brain.engines import pm
+    a = {"price": 100.0, "latest": {"revenue_growth": 0.10, "net_income": 10.0, "ebitda": 20.0, "revenue": 100.0, "fcf": 9.0, "net_debt": 0.0},
+         "valuation": {"market_cap": 1000.0, "history_median": {"pe": 15.0, "ev_ebitda": 8.0, "ev_sales": 1.5, "p_fcf": 20.0}, "percentile_vs_history": {}}}
+    er = pm.expected_return(a, {"pe": 18.0, "ev_ebitda": 9.0}, "Goldilocks")
+    assert er and er["bear"] < er["base"] < er["bull"] and er["band"] in ("accumulate", "build", "hold", "reduce", "exit_candidate")
+    assert abs(sum(er["prob"]) - 1) < 1e-9
+    e = pm.entry_score(90, 80, 85, 70, 60, 50)
+    assert 70 <= e["score"] <= 90 and e["label"] == "attractive entry / build"
+    assert pm.entry_score(40, 30, 40, 20, 50, 50)["label"] == "avoid for now"
+    idx = pd.date_range("2026-01-01", periods=80, freq="B")
+    base = np.random.default_rng(1).normal(0, 0.01, 80)
+    prices = {}
+    for t, noise in (("A", 0.001), ("B", 0.001), ("C", 1.0)):
+        rets = base + np.random.default_rng({"A": 11, "B": 22, "C": 33}[t]).normal(0, 0.01, 80) * noise
+        prices[t] = pd.DataFrame({"date": idx, "adj_close": 100 * np.cumprod(1 + rets)})
+    ret = pm.returns_matrix(prices, ["A", "B", "C"])
+    cl = pm.clusters(ret)
+    assert cl["A"] == cl["B"] and cl["C"] != cl["A"]
+    vol = pm.portfolio_vol(ret, {"A": 0.3, "B": 0.3, "C": 0.4})
+    assert vol and 0.05 < vol < 0.6

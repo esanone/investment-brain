@@ -24,8 +24,11 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Optional
 
+import numpy as np
+
 from .common import r, wmean
 from .fundamentals import ORDER_DECAY
+from . import pm
 
 RULES = {
     "mode": "long_term",
@@ -159,6 +162,23 @@ def _monitor(prior: dict, strategies: dict, analyses: dict, companies: dict, ris
                            "long_term_gain_eligible": row["long_term_gain_eligible"]})
         holdings.append(row)
     freed = sum(e["prior_weight"] for e in exits)
+    pm_inputs = _MONITOR_PM.get("inputs")
+    if pm_inputs:
+        for row in holdings:
+            t = row["ticker"]; a = analyses.get(t)
+            if a:
+                row["pm"] = _pm_detail(t, a, strategies.get(t, {}), {}, companies.get(t, {}), (technicals or {}).get(t) or {}, pm_inputs, _MONITOR_PM.get("events"),
+                                       None, None, regime, flows, today)
+                er = (row["pm"] or {}).get("expected_return")
+                mw = (row["pm"] or {}).get("momentum", {}).get("warnings", [])
+                if er and er["band"] in ("reduce", "exit_candidate"):
+                    row.setdefault("pending_actions", []).append(f"Valuation: expected return {er['expected_return_pct']}% ({er['band']})")
+                if len(mw) >= 2:
+                    row.setdefault("pending_actions", []).append("Momentum deterioration: " + ", ".join(mw))
+        for row in holdings:
+            if row.get("pending_actions") and not any(a["ticker"] == row["ticker"] for a in alerts):
+                alerts.append({"ticker": row["ticker"], "name": row.get("name"), "weight": row["weight"], "pnl_pct": row.get("pnl_pct"), "actions": row["pending_actions"],
+                               "long_term_gain_eligible": row.get("long_term_gain_eligible")})
     sleeves = [dict(x) for x in prior.get("sleeves", [])]
     if freed > 0:
         cash = next((x for x in sleeves if x["symbol"] == "CASH"), None)
@@ -182,12 +202,41 @@ def _monitor(prior: dict, strategies: dict, analyses: dict, companies: dict, ris
            "nav_index": r(nav_index, 4), "nav_peak": r(nav_peak, 4), "drawdown_pct": r((nav_index / nav_peak - 1) * 100, 2), "period_return_pct": r(period_ret * 100, 2),
            "risk_label": risk.get("label"), "regime": regime.get("regime", {}).get("label"),
            "is_initial": False, "prior_as_of": prior.get("as_of")}
+    if pm_inputs and holdings:
+        out["hedge"] = pm.hedge_engine(holdings, pm_inputs.get("prices", {}), risk, regime, flows, portfolio_value)
     out["stats"] = {**prior.get("stats", {}), "positions": len(holdings), "book_pnl_pct": r(wmean([(h.get("pnl_pct"), h["weight"]) for h in holdings]), 1),
                     "turnover": r(freed, 3), "pending_alerts": len(alerts)}
     out.pop("memo", None)   # the memo belongs to the recalibration snapshot; the daily monitor keeps a pointer instead
     out["memo_from"] = prior.get("memo_from") or prior.get("as_of")
     out["memo"] = prior.get("memo")
     return out
+
+
+_MONITOR_PM: dict = {}
+
+
+def _pm_detail(t: str, a: dict, st: dict, sc: dict, company: dict, ta: dict, pm_inputs: dict, events: Optional[dict], hfe_c: Optional[dict],
+               ac: Optional[dict], regime: dict, flows: dict, today: date) -> dict:
+    prices = pm_inputs.get("prices", {})
+    sector = company.get("sector")
+    er = pm.expected_return(a, (pm_inputs.get("sector_medians") or {}).get(sector, {}), regime.get("regime", {}).get("label"))
+    mom = pm.momentum_detail(prices.get(t), prices.get("SPY"), (pm_inputs.get("sector_etf") or {}).get(sector), ta)
+    trig = ((events or {}).get("triggers") or {}).get(t)
+    cat = pm.catalyst_score(t, st, trig, hfe_c, ac, pm_inputs.get("earnings_week") or [], today)
+    fund = wmean([(st.get("opportunity_score"), 0.6), ((hfe_c or {}).get("score", 0) / 8 * 100 if hfe_c else None, 0.4)])
+    regime_score = st.get("macro_fit")
+    gate_open = (regime.get("index_gate") or {}).get("open", True)
+    if regime_score is not None and not gate_open:
+        regime_score *= 0.6
+    rot = (flows.get("sector_rotation") or {}).get(sector)
+    flows_score = wmean([(None if rot is None else (rot + 100) / 2, 0.6), ((ac or {}).get("attention"), 0.4)])
+    entry = pm.entry_score(fund, (er or {}).get("score"), (mom or {}).get("momentum_score"), cat["score"], regime_score, flows_score)
+    px = prices.get(t)
+    vol = None
+    if px is not None and len(px) > 70:
+        vol = float(px.sort_values("date")["adj_close"].pct_change().iloc[-60:].std() * np.sqrt(252) * 100)
+    completed = bool(trig and "results_filed" in trig.get("flags", []) and not (cat.get("next") and (cat["next"].get("days") or 999) <= 60))
+    return {"entry": entry, "expected_return": er, "momentum": mom, "catalyst": cat, "vol_pct": r(vol, 1), "catalyst_completed": completed}
 
 
 def _theme_weights(exposures: list[dict]) -> dict[str, float]:
@@ -228,7 +277,8 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], scores: dict
             portfolio_value: float, as_of: Optional[date] = None, prior_flows: Optional[dict] = None,
             technicals: Optional[dict[str, dict]] = None, longterm: Optional[dict] = None, attention: Optional[dict] = None,
             briefs: Optional[list[dict]] = None, rotation_history: Optional[dict[str, list]] = None,
-            hfe_ranking: Optional[dict] = None, events: Optional[dict] = None) -> dict:
+            hfe_ranking: Optional[dict] = None, events: Optional[dict] = None, pm_inputs: Optional[dict] = None) -> dict:
+    """pm_inputs: {"prices": {sym: df}, "sector_etf": {sector: df}, "sector_medians": {sector: {pe, ev_ebitda, ev_sales, p_fcf}}, "earnings_week": [...]}"""
     """rotation_history: {sector: [(date, rotation_score), ...]} from prior flows snapshots (oldest first).
     hfe_ranking: the Human Futures Engine opportunities payload (candidates + losers) feeding conviction."""
     today = as_of or date.today()
@@ -253,6 +303,7 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], scores: dict
     else:
         recalibrate = True
     if not recalibrate:
+        _MONITOR_PM["inputs"], _MONITOR_PM["events"] = pm_inputs, events
         return _monitor(prior, strategies, analyses, companies, risk, flows, regime, themes_by_id, technicals, briefs,
                         rotation_history, portfolio_value, today, prior_flows, last_recal)
 
@@ -378,7 +429,16 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], scores: dict
             except ValueError:
                 pass
         opp, gap = st["opportunity_score"], st["expectations_gap"]
+        pmd = _pm_detail(t, a, st, sc, companies[t], ta, pm_inputs, events, hfe_c.get(t), att_c.get(t), regime, flows, today) if pm_inputs else None
+        if pmd and not incumbent and (pmd["entry"]["score"] or 0) < pm.RULES["entry_min"]:
+            rejected.append({"ticker": t, "reason": f"Entry score {pmd['entry']['score']} < {pm.RULES['entry_min']} ({pmd['entry']['label']}; ER {pmd['expected_return']['expected_return_pct'] if pmd.get('expected_return') else '—'}%)", "score": pmd["entry"]["score"]})
+            continue
+        if pmd and not incumbent and pmd.get("expected_return") and pmd["expected_return"]["band"] in ("reduce", "exit_candidate"):
+            rejected.append({"ticker": t, "reason": f"Expected return {pmd['expected_return']['expected_return_pct']}% ({pmd['expected_return']['band']}): paying too much for the thesis", "score": pmd["entry"]["score"]})
+            continue
         conviction = (opp - 50) * (1 + max(gap, 0) / 50)
+        if pmd and pmd["entry"]["score"] is not None:
+            conviction *= 0.6 + 0.8 * pmd["entry"]["score"] / 100     # entry score 60 -> x1.08, 85 -> x1.28, 45 -> x0.96
         macro_fit = st.get("macro_fit") or 50
         conviction *= 1 + 0.2 * (macro_fit - 50) / 50
         exps = st.get("theme_exposures", [])
@@ -420,7 +480,7 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], scores: dict
             conviction *= 0.5; notes.append("Cool-down: 3+ stop-outs this run, new entries half-sized")
         if ta and ta.get("overbought") and not incumbent:
             conviction *= 0.5
-        cands.append({"ticker": t, "name": companies[t]["name"], "sector": companies[t]["sector"], "conviction": conviction,
+        cands.append({"ticker": t, "name": companies[t]["name"], "sector": companies[t]["sector"], "conviction": conviction, "pm": pmd,
                       "opportunity": opp, "gap": gap, "reality": st.get("reality"), "narrative": st.get("narrative"), "pricing": st.get("pricing"),
                       "quality": sc.get("quality"), "growth": sc.get("growth"), "value": sc.get("value"), "macro_fit": macro_fit,
                       "lt_conviction": r(lt, 2), "attention": (ac or {}).get("attention"), "hfe_score": r(hfe_score, 2), "hfe_mult": r(hfe_mult, 2),
@@ -432,6 +492,14 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], scores: dict
     # 3. Equal-risk sizing under caps; equity posture is a cap, cash absorbs the rest
     equity_cap = (risk.get("posture", {}).get("recommended", {}).get("Equities") or 65) / 100 * cap_mult
     risk_budget = RULES["risk_per_position_pct"] / 100 * risk_mult
+    prices_all = (pm_inputs or {}).get("prices", {})
+    cl_map = pm.clusters(pm.returns_matrix(prices_all, [c["ticker"] for c in cands[:60]])) if prices_all else {}
+    cluster_w: dict[int, float] = {}
+    if prior_holdings and prices_all:
+        prev_w = {t: h["weight"] for t, h in prior_holdings.items()}
+        pv = pm.portfolio_vol(pm.returns_matrix(prices_all, list(prev_w)), prev_w)
+        if pv and pv > pm.RULES["target_vol"]:
+            equity_cap *= max(pm.RULES["vol_floor_mult"], pm.RULES["target_vol"] / pv)   # volatility targeting on the equity sleeve
     chosen, skipped = [], []
     sector_w: dict[str, float] = {}
     theme_w: dict[str, float] = {}
@@ -454,6 +522,11 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], scores: dict
             skipped.append({"ticker": c["ticker"], "reason": f"{c['sector']} sector cap {RULES['sector_cap']:.0%}"}); continue
         if any(theme_w.get(k, 0) + w * v > RULES["theme_cap"] for k, v in c["themes"].items()):
             skipped.append({"ticker": c["ticker"], "reason": "theme cap"}); continue
+        cid = cl_map.get(c["ticker"])
+        if cid is not None and cluster_w.get(cid, 0) + w > pm.RULES["cluster_cap"]:
+            skipped.append({"ticker": c["ticker"], "reason": f"correlation cluster cap {pm.RULES['cluster_cap']:.0%} (moves with {', '.join(t for t, k in cl_map.items() if k == cid and t != c['ticker'])[:60]})"}); continue
+        if cid is not None:
+            cluster_w[cid] = cluster_w.get(cid, 0) + w
         if sum(x["weight"] for x in chosen) + w > equity_cap:
             w = max(0.0, equity_cap - sum(x["weight"] for x in chosen))
             if w < RULES["min_weight"]:
@@ -462,10 +535,27 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], scores: dict
         sector_w[c["sector"]] = sector_w.get(c["sector"], 0) + w
         for k, v in c["themes"].items():
             theme_w[k] = theme_w.get(k, 0) + w * v
-    for c in chosen:                      # apply trims decided in step 1
+    best_er_risk = max(((c["pm"]["expected_return"]["expected_return_pct"] / max(c["pm"].get("vol_pct") or 25, 5)) for c in cands
+                        if c.get("pm") and c["pm"].get("expected_return") and not c["incumbent"]), default=None)
+    for c in chosen:                      # apply trims decided in step 1 and the graded exits
         tr = incumbents_ok.get(c["ticker"], {}).get("trim")
         if tr:
             c["weight"] = c["weight"] * (1 - tr["fraction"]); c["notes"].append("Trim: " + tr["reason"])
+        pmd = c.get("pm")
+        if c["incumbent"] and pmd:
+            er = pmd.get("expected_return")
+            if er and er["band"] == "reduce":
+                c["weight"] *= 0.75; c["notes"].append(f"Valuation: expected return {er['expected_return_pct']}% -> reduce 25%")
+            g = (pmd.get("momentum") or {}).get("grade", 1.0)
+            if g < 1.0:
+                c["weight"] *= g; c["notes"].append(f"Momentum deterioration ({', '.join(pmd['momentum']['warnings'])}) -> {g:.0%} of size")
+            if pmd.get("catalyst_completed"):
+                c["weight"] *= 0.75; c["notes"].append("Catalyst completed with no next catalyst inside 60 days -> reduce 25%")
+            if best_er_risk and er and pmd.get("vol_pct"):
+                mine = er["expected_return_pct"] / max(pmd["vol_pct"], 5)
+                if mine > 0 and best_er_risk >= pm.RULES["better_opp_ratio"] * mine:
+                    c["notes"].append(f"Better opportunity exists: ER/vol {mine:.2f} vs best candidate {best_er_risk:.2f} (swap candidate)")
+                    c["swap_candidate"] = True
     equity_actual = sum(c["weight"] for c in chosen)
     cash_from_gate = max(0.0, equity_cap - equity_actual)
 
@@ -497,7 +587,7 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], scores: dict
             "entry_price": r(c["entry_price"], 2), "pnl_pct": r((price / c["entry_price"] - 1) * 100, 1) if price and c["entry_price"] else None,
             "trail_high": r(inc.get("trail_high") or price, 2), "stops": c["stops"],
             "conviction": r(c["conviction"], 1), "lt_conviction": c["lt_conviction"], "attention": c["attention"],
-            "hfe_score": c.get("hfe_score"), "hfe_mult": c.get("hfe_mult"),
+            "hfe_score": c.get("hfe_score"), "hfe_mult": c.get("hfe_mult"), "pm": c.get("pm"), "swap_candidate": c.get("swap_candidate", False),
             "opportunity": c["opportunity"], "gap": c["gap"], "reality": c["reality"], "narrative": c["narrative"], "pricing": c["pricing"],
             "quality": c["quality"], "growth": c["growth"], "value": c["value"], "macro_fit": r(c["macro_fit"], 0),
             "technical": {k: c["technical"][k] for k in ("score", "passes", "stage", "ready", "rsi14", "atr_pct", "rs_6m", "pct_from_52w_high")} if c["technical"] else None,
@@ -539,8 +629,10 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], scores: dict
             theme_exposure[e["theme_id"]] = theme_exposure.get(e["theme_id"], 0) + h["weight"] * e["effective"]
     top_themes = sorted(((themes_by_id.get(k, {}).get("name", k), r(v, 3)) for k, v in theme_exposure.items()), key=lambda x: -x[1])[:8]
     cash_total = sum(s["weight"] for s in sleeves if s["sleeve"] == "Cash")
+    hedge = pm.hedge_engine(holdings, prices_all, risk, regime, flows, portfolio_value) if prices_all and holdings else None
 
     return {
+        "hedge": hedge,
         "as_of": today.isoformat(), "portfolio_value": portfolio_value, "rules": RULES,
         "cadence": {"mode": "recalibrate", "last_recalibration": today.isoformat(), "next_recalibration": _next_recalibration(today),
                     "note": "Monthly cadence: this run rebalanced the book; daily runs until the next month only monitor and alert."},

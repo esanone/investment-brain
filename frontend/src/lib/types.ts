@@ -223,6 +223,11 @@ export interface CompanyRow {
   attention?: Num;
   crowded?: boolean;
   not_priced?: boolean;
+  /** Portfolio-management layer (pm.py): Entry Score 0-100; null/absent when the pm detail was not computed. */
+  entry_score?: Num;
+  /** Probability-weighted expected return, percent points. */
+  expected_return_pct?: Num;
+  er_band?: ErBand | null;
 }
 
 export interface CompanyInfo {
@@ -410,6 +415,132 @@ export interface CompanyDetail {
   technical?: CompanyTechnical | null;
   /** Event triggers (insider buys, 8-Ks, gaps) for this ticker from the latest events tape; null/absent when nothing fired. */
   events?: EventTrigger | null;
+  /** Portfolio-management view (entry score, fair-value scenarios, momentum, catalysts); null/absent when not computed. */
+  pm?: PmDetail | null;
+}
+
+// ---------------------------------------------------------------- portfolio management (pm.py)
+/** Expected-return band from pm.py ER_BANDS: ≥25 accumulate, ≥15 build, ≥7 hold, ≥0 reduce, else exit candidate. */
+export type ErBand = "accumulate" | "build" | "hold" | "reduce" | "exit_candidate";
+
+export type PmComponentKey = "fundamentals" | "valuation" | "momentum" | "catalyst" | "regime" | "flows";
+export const PM_COMPONENT_KEYS: PmComponentKey[] = ["fundamentals", "valuation", "momentum", "catalyst", "regime", "flows"];
+
+/** Entry Score: weighted mean of the six pm components (pm.py `entry_score`). */
+export interface PmEntry {
+  score: Num;
+  label: string;
+  components: Partial<Record<PmComponentKey, Num>> & Record<string, Num>;
+  weights: Record<string, number>;
+}
+
+/** Fair-value scenarios (pm.py `expected_return`). Prices in dollars; `*_pct` in percent points. */
+export interface PmExpectedReturn {
+  price: Num;
+  bear: Num;
+  base: Num;
+  bull: Num;
+  /** [p_bear, p_base, p_bull] */
+  prob: [number, number, number];
+  expected_value: Num;
+  expected_return_pct: Num;
+  band: ErBand;
+  upside_base_pct: Num;
+  downside_bear_pct: Num;
+  n_methods: number;
+  score: Num;
+  method: string;
+}
+
+export type PmReturnKey = "1m" | "3m" | "6m" | "12m";
+export type PmRelKey = "3m" | "6m";
+
+/** Momentum detail (pm.py `momentum_detail`). Returns in percent points; relative = excess over the benchmark. */
+export interface PmMomentum {
+  returns: Partial<Record<PmReturnKey, Num>>;
+  relative: { spy?: Partial<Record<PmRelKey, Num>>; sector?: Partial<Record<PmRelKey, Num>> };
+  /** Sector-relative checks are null when no sector ETF was available. */
+  checks: Record<string, boolean | null>;
+  momentum_score: Num;
+  core_passes: number;
+  trend_template: Num;
+  warnings: string[];
+  n_warnings: number;
+  /** Position-size multiplier from the warning count (1.0 / 0.75 / 0.5). */
+  grade: number;
+}
+
+export type PmCatalystKind = "scheduled" | "observed" | "thesis" | "inferred";
+
+export interface PmCatalystItem {
+  catalyst: string;
+  /** 1-10 */
+  impact: number;
+  /** 0-1 */
+  probability: number;
+  days: Num;
+  kind: PmCatalystKind | string;
+}
+
+export interface PmCatalyst {
+  score: Num;
+  items: PmCatalystItem[];
+  next: PmCatalystItem | null;
+  n: number;
+}
+
+/** Per-ticker portfolio-management detail (portfolio.py `_pm_detail`), embedded on holdings and company payloads. */
+export interface PmDetail {
+  entry: PmEntry;
+  /** Null when fundamentals were too thin for any valuation method. */
+  expected_return: PmExpectedReturn | null;
+  /** Null when fewer than 260 price bars were available. */
+  momentum: PmMomentum | null;
+  catalyst: PmCatalyst;
+  /** 60-day annualised volatility, percent points. */
+  vol_pct: Num;
+  /** True when the scheduled catalyst has passed (results filed, nothing within 60 days). */
+  catalyst_completed: boolean;
+}
+
+/** Hedge engine output (pm.py `hedge_engine`) on /api/portfolio. Vol in percent points; weights/exposure as fractions. */
+export interface HedgeCluster {
+  id: number;
+  weight: Num;
+  members: string[];
+  over_cap: boolean;
+}
+
+export interface HedgeStaircase {
+  level: string;
+  target_exposure: Num;
+  vol_warning: boolean;
+  trend_deterioration: boolean;
+  credit_deterioration: boolean;
+  risk_score: Num;
+}
+
+export interface HedgeRecommendation {
+  risk: string;
+  instrument: string;
+  /** Dollars. */
+  notional: Num;
+  why: string;
+}
+
+export interface Hedge {
+  portfolio_vol_pct: Num;
+  target_vol_pct: Num;
+  vol_multiplier: Num;
+  betas: Record<string, Num>;
+  beta_target: Num;
+  sector_weights: Record<string, Num>;
+  clusters: HedgeCluster[];
+  staircase: HedgeStaircase;
+  recommendations: HedgeRecommendation[];
+  options_note: string | null;
+  hierarchy: string[];
+  note: string;
 }
 
 /** Criterion keys of the Minervini-style trend template (technicals.py `trend_template`). */
@@ -617,6 +748,12 @@ export interface Holding {
   long_term_gain_eligible?: boolean;
   /** Rule outcomes deferred to the next monthly recalibration (monitor mode). */
   pending_actions?: string[];
+  // ---- portfolio-management layer (pm.py); absent on older snapshots ----
+  pm?: PmDetail | null;
+  /** True when a watchlist name offers a materially better expected return per unit of volatility. */
+  swap_candidate?: boolean;
+  hfe_score?: Num;
+  hfe_mult?: Num;
 }
 
 export interface Sleeve {
@@ -772,10 +909,13 @@ export interface Portfolio {
   alerts?: PortfolioAlert[];
   /** `as_of` of the recalibration the memo was written at (monitor runs carry the last memo forward). */
   memo_from?: string | null;
+  // ---- portfolio-management layer (pm.py); absent on older snapshots ----
+  /** Hedge engine read (vol targeting, betas, clusters, staircase, recommendations); null/absent when prices were unavailable. */
+  hedge?: Hedge | null;
 }
 
-/** RULES values: numbers, the mode string, booleans, or the drawdown ladder `[[dd%, risk mult, cap mult], ...]`. */
-export type RuleValue = number | string | boolean | number[][];
+/** RULES values: numbers, the mode string, booleans, the drawdown ladder `[[dd%, risk mult, cap mult], ...]`, or a small lookup (e.g. pm `momentum_grades`). */
+export type RuleValue = number | string | boolean | number[][] | Record<string, number>;
 
 /** Faber 10-month SMA + Antonacci 12m-vs-T-bills gate on SPY (pipeline.py). Detail fields absent when history is short. */
 export interface RegimeGate {

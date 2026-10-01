@@ -31,6 +31,7 @@ import { InsiderTxTable } from "@/components/InsiderTxTable";
 import { StageChip } from "@/components/HoldingsTable";
 import { Meter } from "@/components/Meter";
 import { PageHeader } from "@/components/PageHeader";
+import { CatalystTable, EntryBreakdown, ErBandChip, MomentumChecks, MomentumReturns, MomentumWarnings, NextCatalyst, ScenarioStrip, volText } from "@/components/PmDetail";
 import { PriceChart } from "@/components/PriceChart";
 import { ScoreBadge } from "@/components/ScoreBadge";
 import { Section } from "@/components/Section";
@@ -124,6 +125,7 @@ export default async function CompanyPage({ params }: { params: Promise<{ ticker
   const { company, scores, strategist: st, fundamentals: f, on_demand, analyzed_at } = res.data;
   const att = res.data.attention ?? null;
   const ta = res.data.technical ?? null;
+  const pm = res.data.pm ?? null;
   const ev = res.data.events ?? null;
   const evInsider = ev?.insider ?? null;
   const evBuys = evInsider ? (evInsider.recent_buys?.length ? evInsider.recent_buys : evInsider.notable_buys ?? []) : [];
@@ -256,6 +258,95 @@ export default async function CompanyPage({ params }: { params: Promise<{ ticker
                 <KV label="6m RS vs SPY" value={ptsSigned(ta.rs_6m)} cls={signClass(ta.rs_6m)} />
                 <KV label="Close · 50 / 150 / 200-day" value={<span className="text-[12px]">{fmtPrice(ta.close)} · {fmtPrice(ta.sma50)} / {fmtPrice(ta.sma150)} / {fmtPrice(ta.sma200)}</span>} />
                 <KV label="Above 52w low / from high" value={<><span className={signClass(ta.pct_above_52w_low)}>{ptsSigned(ta.pct_above_52w_low)}</span> <span className="text-subtle">/</span> <span className={signClass(ta.pct_from_52w_high)}>{ptsSigned(ta.pct_from_52w_high)}</span></>} />
+              </div>
+            </div>
+          </Section>
+        </div>
+      )}
+
+      {/* Portfolio-management view (pm.py: entry score, fair value, momentum, catalysts) */}
+      {pm && (
+        <div className="mb-4">
+          <Section
+            title="Portfolio-management view"
+            subtitle={
+              <>
+                Entry Score = weighted fundamentals / valuation / momentum / catalyst / regime / flows · new entries need ≥ 60, builds ≥ 75 · vol (60d ann.){" "}
+                <span className="num">{volText(pm.vol_pct)}</span>
+              </>
+            }
+            actions={
+              <div className="flex items-center gap-2">
+                {pm.expected_return && <ErBandChip band={pm.expected_return.band} title="Expected-return band" />}
+                {pm.catalyst_completed && (
+                  <span className="chip border-warn bg-warn-soft text-warn" title="Scheduled catalyst has passed with nothing within 60 days">
+                    catalyst completed
+                  </span>
+                )}
+              </div>
+            }
+          >
+            <div className="grid gap-x-8 gap-y-4 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+              <div>
+                <div className="flex items-start gap-4">
+                  <Tile label="Entry Score" value={num(pm.entry.score, 0)} sub={pm.entry.label} />
+                  {pm.expected_return && (
+                    <Tile
+                      label="Expected return"
+                      value={<span className={signClass(pm.expected_return.expected_return_pct)}>{ptsSigned(pm.expected_return.expected_return_pct, 1)}</span>}
+                      sub={<>EV {fmtPrice(pm.expected_return.expected_value)} vs {fmtPrice(pm.expected_return.price)}</>}
+                    />
+                  )}
+                </div>
+                <div className="mt-3">
+                  <EntryBreakdown entry={pm.entry} size="lg" />
+                </div>
+              </div>
+              <div>
+                <div className="eyebrow mb-1">Fair-value scenarios</div>
+                {pm.expected_return ? (
+                  <ScenarioStrip er={pm.expected_return} />
+                ) : (
+                  <div className="text-[12.5px] text-muted">No valuation methods available (fundamentals too thin for a scenario read).</div>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-x-8 gap-y-4 md:grid-cols-2">
+              <div>
+                <div className="eyebrow mb-1">
+                  Momentum
+                  {pm.momentum && (
+                    <span className="ml-1.5 normal-case tracking-normal text-subtle">
+                      {num(pm.momentum.momentum_score, 0)} · {pm.momentum.core_passes}/5 core · size ×{num(pm.momentum.grade, 2)}
+                    </span>
+                  )}
+                </div>
+                {pm.momentum ? (
+                  <>
+                    <div className="overflow-x-auto rounded border border-line">
+                      <MomentumReturns m={pm.momentum} />
+                    </div>
+                    <div className="mt-3">
+                      <MomentumChecks m={pm.momentum} columns={2} />
+                    </div>
+                    <div className="mt-3">
+                      <div className="eyebrow mb-1">Warnings</div>
+                      <MomentumWarnings m={pm.momentum} />
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-[12.5px] text-muted">No momentum detail (fewer than 260 price bars).</div>
+                )}
+              </div>
+              <div>
+                <div className="eyebrow mb-1">Catalysts · score {num(pm.catalyst.score, 0)}</div>
+                <div className="overflow-x-auto rounded border border-line">
+                  <CatalystTable c={pm.catalyst} />
+                </div>
+                <div className="mt-2">
+                  <NextCatalyst c={pm.catalyst} />
+                </div>
               </div>
             </div>
           </Section>

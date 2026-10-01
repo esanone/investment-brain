@@ -21,7 +21,7 @@ const ACTION_CLASS: Record<TradeAction, string> = {
 };
 
 /** Labels + formatting for the RULES dict in backend/brain/engines/portfolio.py. `pts` = already in percent points. */
-const RULE_LABELS: Record<string, { label: string; kind: "int" | "pct" | "score" | "x" | "pts" | "str" | "bool" | "ladder" }> = {
+const RULE_LABELS: Record<string, { label: string; kind: "int" | "pct" | "score" | "x" | "pts" | "str" | "bool" | "ladder" | "map" }> = {
   mode: { label: "Mode", kind: "str" },
   max_positions: { label: "Max positions", kind: "int" },
   min_positions: { label: "Min positions", kind: "int" },
@@ -57,6 +57,16 @@ const RULE_LABELS: Record<string, { label: string; kind: "int" | "pct" | "score"
   brief_exit_consecutive: { label: "Brief flags → exit", kind: "int" },
   earnings_blackout_days: { label: "Earnings blackout (days)", kind: "int" },
   cooldown_stopouts: { label: "Cool-down after stop-outs", kind: "int" },
+  // portfolio-management layer (pm.py RULES), when the backend merges them in
+  entry_min: { label: "Entry Score minimum", kind: "score" },
+  entry_build: { label: "Entry Score → build", kind: "score" },
+  cluster_corr: { label: "Cluster correlation threshold", kind: "x" },
+  cluster_cap: { label: "Correlation-cluster cap", kind: "pct" },
+  target_vol: { label: "Target volatility", kind: "pct" },
+  vol_floor_mult: { label: "Vol-scaling floor (× exposure)", kind: "x" },
+  momentum_grades: { label: "Momentum grades (warnings → size)", kind: "map" },
+  better_opp_ratio: { label: "Swap when ER/vol ratio ≥", kind: "x" },
+  catalyst_done_gain: { label: "Catalyst-done trim at gain", kind: "pts" },
 };
 
 function ruleFmt(key: string, v: RuleValue | undefined): string {
@@ -67,11 +77,20 @@ function ruleFmt(key: string, v: RuleValue | undefined): string {
     // Turtle ladder: [book drawdown %, risk-per-position multiplier, equity-cap multiplier]
     return v.map((step) => `${pts(step[0], 0)} → risk ×${num(step[1], 2)}, cap ×${num(step[2], 2)}`).join(" · ") || "—";
   }
+  if (typeof v === "object") {
+    // Small lookup, e.g. pm momentum_grades {warnings: size multiplier}
+    return Object.entries(v).map(([k, x]) => `${k} → ×${num(x, 2)}`).join(" · ") || "—";
+  }
   const kind = RULE_LABELS[key]?.kind ?? (Math.abs(v) < 1 && v !== 0 ? "pct" : "int");
   if (kind === "pct") return pct(v, 0);
   if (kind === "pts") return pts(v, v % 1 === 0 ? 0 : 1);
   if (kind === "x") return `${num(v, 2)}x`;
   return num(v, 0);
+}
+
+/** Numeric rule with a fallback (pm.py RULES are only in the payload once the backend merges them). */
+function ruleNum(v: RuleValue | undefined, fallback: number): number {
+  return typeof v === "number" && Number.isFinite(v) ? v : fallback;
 }
 
 /** First ~N characters of a paragraph, cut at a word boundary. */
@@ -143,6 +162,9 @@ export default async function PortfolioPage() {
   const cadence = p.cadence ?? null;
   const alerts = p.alerts ?? [];
   const memoFrom = p.memo_from && p.memo_from !== p.as_of ? p.memo_from : null;
+  const hedge = p.hedge ?? null;
+  const stair = hedge?.staircase ?? null;
+  const volOver = hedge?.portfolio_vol_pct !== null && hedge?.portfolio_vol_pct !== undefined && hedge?.target_vol_pct !== null && hedge?.target_vol_pct !== undefined && hedge.portfolio_vol_pct > hedge.target_vol_pct;
   const sectorRows: [string, number][] = Object.entries(s?.sector_weights ?? {}).sort((a, b) => b[1] - a[1]);
   const themeRows: [string, number][] = [...(s?.theme_weights ?? [])];
   const confidence = memo?.confidence === null || memo?.confidence === undefined ? null : memo.confidence <= 1 ? memo.confidence * 100 : memo.confidence;
@@ -561,6 +583,190 @@ export default async function PortfolioPage() {
           </div>
         </Section>
 
+
+        <Section
+          title="Hedge engine"
+          subtitle={
+            hedge
+              ? "Volatility targeting, factor betas, correlation clusters and the defence staircase · recommendations only, equity sleeve scales by the vol multiplier"
+              : "Volatility targeting, factor betas, correlation clusters and the defence staircase"
+          }
+          className="lg:col-span-2"
+          actions={
+            stair ? (
+              <span
+                className={`chip ${stair.level === "normal" ? "border-pos bg-pos-soft text-pos" : stair.level.includes("credit") ? "border-neg bg-neg-soft text-neg" : "border-warn bg-warn-soft text-warn"}`}
+                title={`Risk score ${num(stair.risk_score, 0)}`}
+              >
+                {stair.level}
+              </span>
+            ) : undefined
+          }
+        >
+          {!hedge ? (
+            <div className="text-[12.5px] text-muted">Not recorded in this snapshot (hedge engine needs the price store).</div>
+          ) : (
+            <>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <Tile
+                  label="Portfolio vol"
+                  value={<span className={volOver ? "text-warn" : ""}>{pts(hedge.portfolio_vol_pct, 1)}</span>}
+                  sub={<>target {pts(hedge.target_vol_pct, 0)} · 60-day annualised{stair?.vol_warning ? <span className="text-warn"> · warning (&gt; 1.3× target)</span> : null}</>}
+                />
+                <Tile
+                  label="Vol multiplier"
+                  value={<>×{num(hedge.vol_multiplier, 2)}</>}
+                  cls={hedge.vol_multiplier !== null && hedge.vol_multiplier < 1 ? "text-warn" : ""}
+                  sub="Equity-sleeve scaling = target vol ÷ realised, floored"
+                />
+                <Tile
+                  label="Target exposure"
+                  value={pct(stair?.target_exposure, 0)}
+                  cls={stair && stair.target_exposure !== null && stair.target_exposure < 1 ? "text-warn" : ""}
+                  sub={<>staircase level · beta target {num(hedge.beta_target, 2)}</>}
+                />
+                <div className="rounded border border-line bg-surface-2 px-3 py-2.5">
+                  <div className="eyebrow">Staircase flags</div>
+                  <ul className="mt-1.5 flex flex-col gap-0.5 text-[12.5px]">
+                    {(
+                      [
+                        ["Volatility", stair?.vol_warning],
+                        ["Trend", stair?.trend_deterioration],
+                        ["Credit", stair?.credit_deterioration],
+                      ] as [string, boolean | undefined][]
+                    ).map(([label, bad]) => (
+                      <li key={label} className="flex items-center gap-2">
+                        <span className={`w-4 text-center ${bad === undefined ? "text-subtle" : bad ? "text-neg" : "text-pos"}`}>{bad === undefined ? "○" : bad ? "✗" : "✓"}</span>
+                        <span>
+                          {label} <span className="text-muted">{bad === undefined ? "" : bad ? "deteriorating" : "clear"}</span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="mt-1.5 text-[11.5px] text-muted">risk score {num(stair?.risk_score, 0)}</div>
+                </div>
+              </div>
+
+              <div className="mt-4">
+                <div className="eyebrow mb-1.5">Equity-book betas (60-day)</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {["SPY", "QQQ", "SMH", "TLT", "XLE", "USO", ...Object.keys(hedge.betas ?? {}).filter((k) => !["SPY", "QQQ", "SMH", "TLT", "XLE", "USO"].includes(k))].map((sym) => {
+                    const b = hedge.betas?.[sym];
+                    const missing = b === null || b === undefined;
+                    return (
+                      <span key={sym} className={`chip num ${missing ? "text-subtle" : ""}`} title={missing ? `${sym}: no price history` : `Beta of the equity book to ${sym}`}>
+                        {sym} <span className={missing ? "" : "font-medium text-ink"}>{missing ? "—" : signed(b, 2)}</span>
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-x-6 gap-y-4 lg:grid-cols-2">
+                <div>
+                  <div className="eyebrow mb-1.5">Correlation clusters · cap {pct(ruleNum(p.rules?.cluster_cap, 0.25), 0)}</div>
+                  <div className="overflow-x-auto rounded border border-line">
+                    <table className="tbl">
+                      <thead>
+                        <tr>
+                          <th className="num">#</th>
+                          <th>Members</th>
+                          <th className="num">Weight</th>
+                          <th></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(hedge.clusters ?? []).map((c) => (
+                          <tr key={c.id}>
+                            <td className="num text-muted">{c.id}</td>
+                            <td>
+                              <div className="flex flex-wrap gap-x-2 gap-y-0.5 whitespace-normal">
+                                {c.members.map((t) => (
+                                  <Link key={t} href={`/companies/${t}`} className="font-medium">
+                                    {t}
+                                  </Link>
+                                ))}
+                              </div>
+                            </td>
+                            <td className={`num font-medium ${c.over_cap ? "text-neg" : ""}`}>{pct(c.weight, 1)}</td>
+                            <td>{c.over_cap && <span className="chip border-neg bg-neg-soft text-neg">over cap</span>}</td>
+                          </tr>
+                        ))}
+                        {!hedge.clusters?.length && (
+                          <tr>
+                            <td colSpan={4} className="text-muted">No clusters (fewer than two names with overlapping history).</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                <div>
+                  <div className="eyebrow mb-1.5">Recommendations · {hedge.recommendations?.length ?? 0}</div>
+                  <div className="overflow-x-auto rounded border border-line">
+                    <table className="tbl">
+                      <thead>
+                        <tr>
+                          <th>Risk</th>
+                          <th>Instrument</th>
+                          <th className="num">Notional</th>
+                          <th>Why</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(hedge.recommendations ?? []).map((r, i) => (
+                          <tr key={`${r.risk}-${i}`}>
+                            <td className="font-medium">
+                              <div className="max-w-56 whitespace-normal">{r.risk}</div>
+                            </td>
+                            <td className="text-muted">
+                              <div className="max-w-48 whitespace-normal">{r.instrument}</div>
+                            </td>
+                            <td className="num font-medium">{money(r.notional, 1)}</td>
+                            <td className="text-muted">
+                              <div className="max-w-md whitespace-normal">{r.why}</div>
+                            </td>
+                          </tr>
+                        ))}
+                        {!hedge.recommendations?.length && (
+                          <tr>
+                            <td colSpan={4} className="text-muted">No hedges recommended at the current betas, concentration and clusters.</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  {hedge.options_note && (
+                    <div className="mt-2 rounded border border-warn bg-warn-soft px-3 py-2 text-[12.5px]">
+                      <span className="font-medium text-warn">Options · </span>
+                      {hedge.options_note}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {!!hedge.hierarchy?.length && (
+                <div className="mt-4">
+                  <div className="eyebrow mb-1.5">Defence hierarchy</div>
+                  <ol className="flex flex-wrap items-center gap-y-1.5 text-[12.5px]">
+                    {hedge.hierarchy.map((step, i) => (
+                      <li key={step} className="flex items-center">
+                        <span className="inline-flex items-center gap-1.5 rounded border border-line bg-surface-2 px-2 py-0.5">
+                          <span className="num text-[11px] text-subtle">{i + 1}</span>
+                          <span>{step}</span>
+                        </span>
+                        {i < hedge.hierarchy.length - 1 && <span className="mx-1.5 text-subtle">→</span>}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+
+              {hedge.note && <div className="mt-3 text-[11.5px] text-muted">{hedge.note}</div>}
+            </>
+          )}
+        </Section>
+
         <Section title="Watchlist" subtitle="Next names up · passed the filters, outside the book" flush>
           <div className="tbl-wrap">
             <table className="tbl">
@@ -673,7 +879,7 @@ export default async function PortfolioPage() {
         <Section title="Rules" subtitle="Construction constraints applied on every run" className="lg:col-span-2">
           <dl className="grid gap-x-6 gap-y-1 text-[12.5px] sm:grid-cols-2 lg:grid-cols-4">
             {ruleKeys.map((k) => (
-              <div key={k} className={`flex items-baseline justify-between gap-3 border-b border-line py-1 ${Array.isArray(p.rules[k]) ? "sm:col-span-2" : ""}`}>
+              <div key={k} className={`flex items-baseline justify-between gap-3 border-b border-line py-1 ${typeof p.rules[k] === "object" ? "sm:col-span-2" : ""}`}>
                 <dt className="text-muted">{RULE_LABELS[k]?.label ?? k}</dt>
                 <dd className="text-right font-medium">{ruleFmt(k, p.rules[k])}</dd>
               </div>

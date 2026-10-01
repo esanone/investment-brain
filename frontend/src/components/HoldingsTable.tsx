@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { EntryRule, Holding } from "@/lib/types";
 import { date, money, num, pct, price, pts, ptsSigned, signed, signClass, yesNo } from "@/lib/format";
 import { ScoreBadge } from "./ScoreBadge";
+import { CatalystTable, EntryBreakdown, ErCell, MomCell, MomentumChecks, MomentumReturns, MomentumWarnings, NextCatalyst, ScenarioStrip, volText } from "./PmDetail";
 
 /** Human labels for the trend-template stage (technicals.py `trend_template`). */
 export const STAGE_LABELS: Record<string, string> = {
@@ -85,7 +86,7 @@ export function RulesTable({ rules, evaluated }: { rules: EntryRule[]; evaluated
   );
 }
 
-const COLS = 25;
+const COLS = 28;
 
 /** Holdings table with expandable rows showing each position's frozen entry rules. */
 export function HoldingsTable({ rows }: { rows: Holding[] }) {
@@ -126,6 +127,9 @@ export function HoldingsTable({ rows }: { rows: Holding[] }) {
             <th className="num" title="Trend-template score (0-100)">Tech</th>
             <th className="num" title="Long-term theme conviction (0-1)">LT</th>
             <th className="num" title="Attention score (0-100)">Attn</th>
+            <th className="num" title="Entry Score (0-100) · weighted fundamentals / valuation / momentum / catalyst / regime / flows">Entry</th>
+            <th className="num" title="Probability-weighted expected return and band">ER</th>
+            <th className="num" title="Momentum score (0-100) · badge = deterioration warnings">Mom</th>
             <th className="num">Conviction</th>
             <th className="num">Opp</th>
             <th className="num">Gap</th>
@@ -182,6 +186,9 @@ function HoldingRow({
   const ta = h.technical ?? null;
   const flags = h.brief_flags ?? 0;
   const techFails = h.tech_fail_runs ?? 0;
+  const pm = h.pm ?? null;
+  const er = pm?.expected_return ?? null;
+  const mom = pm?.momentum ?? null;
   return (
     <>
       <tr>
@@ -235,6 +242,15 @@ function HoldingRow({
         </td>
         <td className="num">{pct(h.lt_conviction, 0)}</td>
         <td className="num text-muted">{num(h.attention, 0)}</td>
+        <td className="num" title={pm ? pm.entry.label : undefined}>
+          {pm ? <ScoreBadge value={pm.entry.score} /> : "—"}
+        </td>
+        <td className="num">
+          <ErCell value={er?.expected_return_pct} band={er?.band} title={er ? `${er.n_methods} valuation method${er.n_methods === 1 ? "" : "s"}` : undefined} />
+        </td>
+        <td className="num">
+          <MomCell m={mom} />
+        </td>
         <td className="num">{num(h.conviction, 1)}</td>
         <td className="num"><ScoreBadge value={h.opportunity} /></td>
         <td className={`num ${signClass(h.gap)}`}>{signed(h.gap, 0)}</td>
@@ -250,6 +266,11 @@ function HoldingRow({
           <span className="ml-1.5 text-[11.5px] text-subtle">{date(h.entered)}</span>
           {evaluated && triggered > 0 && <span className="ml-1.5 text-[11px] text-neg">{triggered} rule{triggered > 1 ? "s" : ""} hit</span>}
           {flags > 0 && <span className="ml-1.5 text-[11px] text-warn">{flags} brief flag{flags > 1 ? "s" : ""}</span>}
+          {h.swap_candidate && (
+            <span className="ml-1.5 chip border-warn bg-warn-soft text-warn" title="A watchlist name offers a materially better expected return per unit of volatility">
+              swap candidate
+            </span>
+          )}
         </td>
         <td className="max-w-72 truncate text-[12px] text-muted" title={h.notes?.join(" · ")}>
           {h.notes?.length ? h.notes.join(" · ") : "—"}
@@ -365,9 +386,79 @@ function HoldingRow({
                 </div>
               </div>
             </div>
+            {pm && <PmBlock pm={pm} swap={!!h.swap_candidate} />}
           </td>
         </tr>
       )}
     </>
+  );
+}
+
+/** Portfolio-management detail for one holding (expanded row): entry score, scenarios, momentum, catalysts. */
+function PmBlock({ pm, swap }: { pm: NonNullable<Holding["pm"]>; swap: boolean }) {
+  const er = pm.expected_return;
+  const mom = pm.momentum;
+  return (
+    // Capped width: the row spans the whole (very wide) table, so keep the block readable at the table's left
+    // edge instead of stretching the scenario strip across every column.
+    <div className="max-w-[1100px] border-l-2 border-t border-line-strong border-t-line px-3 py-2">
+      <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px]">
+        <span className="eyebrow">Portfolio management</span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="text-muted">Entry</span>
+          <ScoreBadge value={pm.entry.score} />
+          <span className="text-muted">{pm.entry.label}</span>
+        </span>
+        <span>
+          <span className="text-muted">Vol (60d ann.)</span> <span className="num font-medium">{volText(pm.vol_pct)}</span>
+        </span>
+        {swap && (
+          <span className="chip border-warn bg-warn-soft text-warn" title="A watchlist name offers a materially better expected return per unit of volatility">
+            swap candidate
+          </span>
+        )}
+      </div>
+      <div className="grid gap-x-6 gap-y-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+        <div>
+          <div className="eyebrow mb-1">Entry Score breakdown</div>
+          <EntryBreakdown entry={pm.entry} />
+        </div>
+        <div>
+          <div className="eyebrow mb-1">Fair-value scenarios</div>
+          {er ? <ScenarioStrip er={er} compact /> : <div className="text-[12.5px] text-muted">No valuation methods available (fundamentals too thin).</div>}
+        </div>
+      </div>
+      <div className="mt-3 grid gap-x-6 gap-y-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+        <div>
+          <div className="eyebrow mb-1">
+            Momentum{mom ? <span className="ml-1.5 normal-case tracking-normal text-subtle">{num(mom.momentum_score, 0)} · {mom.core_passes}/5 core</span> : null}
+          </div>
+          {mom ? (
+            <>
+              <div className="overflow-x-auto rounded border border-line bg-surface">
+                <MomentumReturns m={mom} />
+              </div>
+              <div className="mt-2">
+                <MomentumChecks m={mom} />
+              </div>
+              <div className="mt-2">
+                <MomentumWarnings m={mom} />
+              </div>
+            </>
+          ) : (
+            <div className="text-[12.5px] text-muted">No momentum detail (fewer than 260 price bars).</div>
+          )}
+        </div>
+        <div>
+          <div className="eyebrow mb-1">Catalysts</div>
+          <div className="overflow-x-auto rounded border border-line bg-surface">
+            <CatalystTable c={pm.catalyst} />
+          </div>
+          <div className="mt-2">
+            <NextCatalyst c={pm.catalyst} completed={pm.catalyst_completed} />
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

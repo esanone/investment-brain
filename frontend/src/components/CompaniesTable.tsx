@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import type { CompanyRow, Num } from "@/lib/types";
 import { money, multiple, pct, price, ptsSigned, signed, signClass } from "@/lib/format";
 import { AttentionFlags } from "./AttentionFlags";
+import { ErCell } from "./PmDetail";
 import { ScoreBadge } from "./ScoreBadge";
 
 type NumericKey =
@@ -25,7 +26,9 @@ type NumericKey =
   | "pe"
   | "ev_sales"
   | "return_3m"
-  | "attention";
+  | "attention"
+  | "entry_score"
+  | "expected_return_pct";
 type SortKey = NumericKey | "ticker" | "sector" | "top_theme";
 
 interface Col {
@@ -95,6 +98,18 @@ const COLS: Col[] = [
         <ScoreBadge value={c.attention} />
       </span>
     ),
+  },
+  {
+    key: "entry_score",
+    label: "Entry",
+    numeric: true,
+    render: (c) => <ScoreBadge value={c.entry_score} />,
+  },
+  {
+    key: "expected_return_pct",
+    label: "ER %",
+    numeric: true,
+    render: (c) => <ErCell value={c.expected_return_pct} band={c.er_band} />,
   },
   {
     key: "top_theme",

@@ -163,7 +163,8 @@ def analyze(ticker: str) -> dict:
     # 3. analyse + score on the same cross-sectional scale
     fdf["period_end"] = pd.to_datetime(fdf["period_end"]); fdf["filed"] = pd.to_datetime(fdf["filed"])
     px["date"] = pd.to_datetime(px["date"]) if not px.empty else px
-    a = fund_engine.analyze_company(t, fdf, px, as_of, sector=meta["sector"])
+    from .data.prices import nasdaq_market_cap
+    a = fund_engine.analyze_company(t, fdf, px, as_of, sector=meta["sector"], market_cap_override=nasdaq_market_cap(t))
     if not a:
         has_rev = bool(len(fdf[(fdf.metric == "revenue")]))
         why = ("no revenue reported in its XBRL filings (pre-revenue company)" if not has_rev

@@ -199,3 +199,25 @@ adoption stage, scenarios, indicators, value pools and mapped companies. Every t
 probability history; the monthly review asks only "what changed?"; resolved theses are Brier-scored and binned for
 calibration. `python -m brain.pipeline thesis-v2 --seed | --new "..." | --update all | --resolve T-001:true`.
 The original `/thesis` page (Human Future engine) is unchanged; the ledger lives at `/thesis-v2`.
+
+## Portfolio-management layer (entry, sizing, exits, hedging)
+
+`backend/brain/engines/pm.py` separates *what to own* from *when and how much*:
+
+- **Entry Score** = 0.30 fundamentals/thesis + 0.20 valuation + 0.20 momentum + 0.15 catalyst + 0.10 regime + 0.05 flows. New
+  positions need ≥ 60 ("accumulate slowly"; ≥ 75 "attractive entry / build") on top of the trend-template floor.
+- **Expected return**: bear/base/bull fair values from multiples (own 5-year median blended 60/40 with the sector, capped at
+  2× sector) applied to normalised metrics (half current TTM, half the 8-quarter median), probability-weighted by regime.
+  Bands: > 25% accumulate, 15–25 build, 7–15 hold, 0–7 reduce (−25% at recalibration), < 0 exit candidate (flagged).
+  Market caps come from Nasdaq's quote summary; XBRL share counts are unreliable for multi-class filers.
+- **Momentum**: absolute (200-day, 50 > 200, 12-month) plus relative strength versus the S&P *and* the sector ETF; two
+  deterioration warnings cut a holding to 75%, three to 50%.
+- **Catalysts**: earnings, insider clusters, post-earnings drift, thesis confirmation signals, attention, scored by
+  impact × probability × timing; a completed catalyst with nothing inside 60 days trims 25%.
+- **Better opportunity**: holdings whose expected return per unit of volatility is less than half the best candidate's are
+  flagged as swap candidates.
+- **Construction**: equal-risk sizing, correlation clusters (60-day correlation > 0.7) capped at 25%, covariance portfolio
+  volatility, vol targeting at 12% on the equity sleeve.
+- **Hedge engine**: portfolio betas to SPY/QQQ/SMH/TLT/XLE/USO, the staircase (volatility warning 80% → + trend 65% →
+  + credit 50%), matched hedge *recommendations* (index, sector, rates) with notionals, options only as a note when the
+  risk score is ≥ 70. Single-name trades stay monthly; hedge advice updates daily.

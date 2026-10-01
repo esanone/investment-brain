@@ -182,7 +182,8 @@ def test_pm_expected_return_entry_score_and_clusters():
     base = np.random.default_rng(1).normal(0, 0.01, 80)
     prices = {}
     for t, noise in (("A", 0.001), ("B", 0.001), ("C", 1.0)):
-        rets = base + np.random.default_rng({"A": 11, "B": 22, "C": 33}[t]).normal(0, 0.01, 80) * noise
+        own = np.random.default_rng({"A": 11, "B": 22, "C": 33}[t]).normal(0, 0.01, 80)
+        rets = (base + own * noise) if t != "C" else own
         prices[t] = pd.DataFrame({"date": idx, "adj_close": 100 * np.cumprod(1 + rets)})
     ret = pm.returns_matrix(prices, ["A", "B", "C"])
     cl = pm.clusters(ret)

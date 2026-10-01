@@ -149,3 +149,16 @@ def fetch_history(symbol: str, range_: str | None = None) -> pd.DataFrame:
             errors.append(f"{provider.__name__}: {e}")
     print(f"[prices] {symbol}: all providers failed ({'; '.join(errors)})")
     return _EMPTY.copy()
+
+
+def nasdaq_market_cap(symbol: str) -> Optional[float]:
+    """Market cap from Nasdaq's quote summary (key-free). The authority for share counts, since XBRL cover-page
+    counts are missing or per-class for multi-class filers (Visa, Interactive Brokers, Simon Property)."""
+    try:
+        text = cached_get(f"https://api.nasdaq.com/api/quote/{symbol}/summary", namespace="nasdaq_summary", key=f"{symbol}_{date.today():%Y%m%d}",
+                          ttl_hours=24, headers={"User-Agent": _BROWSER_UA, "Accept": "application/json"}, params={"assetclass": "stocks"})
+        v = (((json.loads(text).get("data") or {}).get("summaryData") or {}).get("MarketCap") or {}).get("value")
+        time.sleep(0.2)
+        return float(str(v).replace(",", "").replace("$", "")) if v and str(v) not in ("N/A", "--") else None
+    except Exception:
+        return None

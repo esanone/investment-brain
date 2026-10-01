@@ -35,7 +35,7 @@ TAGS: dict[str, tuple[str, list[str]]] = {
                               "IncomeLossFromContinuingOperationsBeforeIncomeTaxesDomestic"]),
     "tax": ("dur", ["IncomeTaxExpenseBenefit"]),
     "net_income": ("dur", ["NetIncomeLoss", "ProfitLoss", "NetIncomeLossAvailableToCommonStockholdersBasic"]),
-    "eps_diluted": ("dur", ["EarningsPerShareDiluted", "EarningsPerShareBasic"]),
+    "eps_diluted": ("dur", ["EarningsPerShareDiluted", "IncomeLossFromContinuingOperationsPerDilutedShare", "EarningsPerShareBasic", "IncomeLossFromContinuingOperationsPerBasicShare"]),
     "shares_diluted": ("dur", ["WeightedAverageNumberOfDilutedSharesOutstanding", "WeightedAverageNumberOfShareOutstandingBasicAndDiluted",
                                "WeightedAverageNumberOfSharesOutstandingBasic"]),
     "ocf": ("dur", ["NetCashProvidedByUsedInOperatingActivities", "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"]),

@@ -66,12 +66,13 @@ def _shares_known(fdf: pd.DataFrame, as_of: pd.Timestamp) -> Optional[float]:
 def _reconcile_shares(shares: Optional[float], m: dict) -> Optional[float]:
     """Cross-check the share count against net income / EPS. Some filers report share
     counts in millions (McDonald's) or one class only; NI/EPS is unit-consistent."""
-    ni, eps = m.get("net_income"), m.get("eps")
+    ni, eps, dil = m.get("net_income"), m.get("eps"), m.get("shares_diluted")
     implied = ni / eps if ni and eps and eps > 0 and ni > 0 else None
-    if implied is None:
+    ref = implied or dil
+    if ref is None:
         return shares
-    if shares is None or not (0.5 < shares / implied < 2.0):
-        return implied
+    if shares is None or not (0.67 < shares / ref < 1.5):
+        return ref
     return shares
 
 
@@ -201,7 +202,8 @@ def _multiples(mcap: Optional[float], m: dict) -> dict:
 FINANCIAL_SECTORS = {"Financials"}
 
 
-def analyze_company(ticker: str, fdf: pd.DataFrame, px: pd.DataFrame, as_of: Optional[date] = None, sector: Optional[str] = None) -> Optional[dict]:
+def analyze_company(ticker: str, fdf: pd.DataFrame, px: pd.DataFrame, as_of: Optional[date] = None, sector: Optional[str] = None,
+                    market_cap_override: Optional[float] = None) -> Optional[dict]:
     as_of_ts = pd.Timestamp(as_of or date.today())
     financial = sector in FINANCIAL_SECTORS
     if fdf is None or fdf.empty:
@@ -217,7 +219,12 @@ def analyze_company(ticker: str, fdf: pd.DataFrame, px: pd.DataFrame, as_of: Opt
 
     px = px.sort_values("date") if px is not None and len(px) else pd.DataFrame(columns=["date", "close", "adj_close", "volume"])
     price = _price_on(px, as_of_ts)
-    shares = _reconcile_shares(_shares_known(fdf, as_of_ts) or latest.get("shares_diluted"), latest)
+    xbrl_shares = _reconcile_shares(_shares_known(fdf, as_of_ts) or latest.get("shares_diluted"), latest)
+    shares, share_ratio = xbrl_shares, 1.0
+    if market_cap_override and price:
+        shares = market_cap_override / price                    # exchange-reported market cap wins over XBRL share counts
+        if xbrl_shares and 0.2 < shares / xbrl_shares < 20:
+            share_ratio = shares / xbrl_shares                  # rescale the XBRL history so past multiples are on the same basis
     mcap = price * shares if price and shares else None
     val = _multiples(mcap, latest)
 
@@ -232,6 +239,7 @@ def analyze_company(ticker: str, fdf: pd.DataFrame, px: pd.DataFrame, as_of: Opt
             sh = _reconcile_shares(_shares_known(fdf, m), known[-1]) if known else None
             if not known or not p or not sh:
                 continue
+            sh = sh * share_ratio
             mm = _multiples(p * sh, known[-1])
             for k in hist_mult:
                 if mm.get(k) is not None:

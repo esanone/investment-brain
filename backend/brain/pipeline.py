@@ -563,8 +563,10 @@ def compute_all(frames: dict, as_of: date, use_llm: bool, llm_top_n: Optional[in
 
     log(f"engine: fundamentals for {len(companies)} companies")
     analyses = {}
+    from .data.prices import nasdaq_market_cap
     for t in companies:
-        a = fund_engine.analyze_company(t, frames["fundamentals"].get(t), prices.get(t), as_of, sector=companies[t]["sector"])
+        a = fund_engine.analyze_company(t, frames["fundamentals"].get(t), prices.get(t), as_of, sector=companies[t]["sector"],
+                                        market_cap_override=nasdaq_market_cap(t))
         if a:
             analyses[t] = a
     scores = fund_engine.score_universe(analyses, companies, prices.get("SPY"))

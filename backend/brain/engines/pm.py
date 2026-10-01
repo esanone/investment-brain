@@ -32,45 +32,59 @@ SECTOR_HEDGE = {"Technology": "QQQ", "Communication Services": "QQQ", "Semicondu
 
 # ------------------------------------------------------------------ expected return
 def expected_return(analysis: dict, sector_medians: dict, regime_label: Optional[str]) -> Optional[dict]:
-    """Scenario fair values from multiples: bear = low multiple x trough metric, base = own-history median x forward metric,
-    bull = high multiple x forward metric. Probabilities tilt with the regime."""
+    """Scenario fair values from multiples applied to NORMALISED metrics (half current TTM, half the median of the last
+    eight TTM readings, so peak-cycle earnings are not capitalised at trough-cycle multiples). Multiples: the company's
+    own 5-year median, shrunk toward the sector median and capped at 1.5x sector. Bear = trough metric x 0.8 multiple,
+    base = normalised metric x multiple, bull = base x 1.35. Probabilities tilt with the regime."""
     L, V, price = analysis.get("latest", {}), analysis.get("valuation", {}), analysis.get("price")
     if not price or not V.get("market_cap"):
         return None
     shares = V["market_cap"] / price
-    g = max(-0.3, min(0.3, L.get("revenue_growth") or 0.0))
-    fwd = 1 + 0.75 * g                                   # 12-24 month forward metrics, growth haircut
+    hist = analysis.get("history") or []
+    med = V.get("history_median") or {}
     net_debt = L.get("net_debt") or 0.0
-    med, pct = V.get("history_median") or {}, V.get("percentile_vs_history") or {}
-    values = []
+
+    def norm(key: str) -> tuple[Optional[float], Optional[float]]:
+        cur = L.get(key)
+        past = [h.get(key) for h in hist[-8:] if h.get(key) is not None and h.get(key) > 0]
+        if not cur or cur <= 0:
+            return None, None
+        if len(past) >= 4:
+            return 0.5 * cur + 0.5 * float(np.median(past)), float(min(past))
+        return cur, cur * 0.8
+
+    def multiple(key: str) -> Optional[float]:
+        own, sec = med.get(key), sector_medians.get(key)
+        if own and sec:
+            return min(0.6 * own + 0.4 * sec, 2.0 * sec)       # lean on the company's own history; sector caps the excess
+        return own or sec
+
     def ev_to_price(ev: float) -> float:
         return max((ev - net_debt) / shares, 0.01)
-    if L.get("net_income") and L["net_income"] > 0:
-        for m in (med.get("pe"), sector_medians.get("pe")):
-            if m: values.append(("pe", m * L["net_income"] * fwd / shares))
-    if L.get("ebitda") and L["ebitda"] > 0:
-        for m in (med.get("ev_ebitda"), sector_medians.get("ev_ebitda")):
-            if m: values.append(("ev_ebitda", ev_to_price(m * L["ebitda"] * fwd)))
-    if L.get("revenue") and L["revenue"] > 0:
-        for m in (med.get("ev_sales"), sector_medians.get("ev_sales")):
-            if m: values.append(("ev_sales", ev_to_price(m * L["revenue"] * fwd)))
-    if L.get("fcf") and L["fcf"] > 0:
-        for m in (med.get("p_fcf"), sector_medians.get("p_fcf")):
-            if m: values.append(("p_fcf", m * L["fcf"] * fwd / shares))
-    vals = [v for _, v in values if v and np.isfinite(v)]
-    if len(vals) < 2:
+
+    bases, bears = [], []
+    for key, metric, via_ev in (("pe", "net_income", False), ("ev_ebitda", "ebitda", True), ("ev_sales", "revenue", True), ("p_fcf", "fcf", False)):
+        m = multiple(key)
+        nrm, trough = norm(metric)
+        if not m or not nrm:
+            continue
+        b = m * nrm; t = 0.8 * m * (trough or nrm)
+        bases.append(ev_to_price(b) if via_ev else b / shares)
+        bears.append(ev_to_price(t) if via_ev else t / shares)
+    bases = [v for v in bases if np.isfinite(v) and v > 0]; bears = [v for v in bears if np.isfinite(v) and v > 0]
+    if len(bases) < (1 if L.get("financial") else 2):
         return None
-    base = float(np.median(vals))
-    bear = float(min(vals)) * 0.85 / max(fwd, 0.8)      # trough multiple on trough metrics
-    bull = float(max(vals)) * 1.10
+    base = float(np.median(bases)); bull = base * 1.35
+    bear = float(np.clip(min(bears), 0.4 * base, base))        # bear case floored at a 60% haircut to base
     p_bear, p_base, p_bull = {"Contraction": (0.30, 0.50, 0.20), "Stagflation": (0.30, 0.50, 0.20), "Reflation": (0.20, 0.50, 0.30)}.get(regime_label, (0.20, 0.55, 0.25))
     ev = p_bear * bear + p_base * base + p_bull * bull
-    er = (ev / price - 1) * 100
+    er = max(-90.0, min(150.0, (ev / price - 1) * 100))
     band = next(b for thr, b in ER_BANDS if er >= thr)
     return {"price": r(price, 2), "bear": r(bear, 2), "base": r(base, 2), "bull": r(bull, 2), "prob": [p_bear, p_base, p_bull],
             "expected_value": r(ev, 2), "expected_return_pct": r(er, 1), "band": band, "upside_base_pct": r((base / price - 1) * 100, 1),
-            "downside_bear_pct": r((bear / price - 1) * 100, 1), "n_methods": len(vals),
-            "score": r(sigmoid_score((er - 10) / 15, k=1.0), 0)}
+            "downside_bear_pct": r((bear / price - 1) * 100, 1), "n_methods": len(bases),
+            "score": r(sigmoid_score((er - 10) / 15, k=1.0), 0),
+            "method": "normalised metrics (half current, half 8-quarter median) x blended own/sector multiples (60/40) capped at 2x sector"}
 
 
 # ------------------------------------------------------------------ momentum (absolute + relative)

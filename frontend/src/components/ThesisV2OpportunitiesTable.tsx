@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import type { ThesisV2Candidate } from "@/lib/types";
-import { num, signClass, signed } from "@/lib/format";
+import { num, signClass, signed, companyHref } from "@/lib/format";
 import { ScoreBadge } from "@/components/ScoreBadge";
 import { ReadinessChip, RoleChip, ThesisRefChip } from "@/components/ThesisV2Chips";
 
@@ -64,7 +64,7 @@ export function ThesisV2OpportunitiesTable({ rows, meta }: { rows: ThesisV2Candi
               return (
                 <tr key={r.ticker} className="align-top">
                   <td>
-                    <Link href={`/companies/${r.ticker}`} className="mono font-medium">
+                    <Link href={companyHref(r.ticker)} className="mono font-medium">
                       {r.ticker}
                     </Link>
                   </td>

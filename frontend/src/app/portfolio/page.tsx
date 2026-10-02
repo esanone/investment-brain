@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import type { RuleValue, TradeAction } from "@/lib/types";
-import { date, money, num, pct, price, pts, ptsSigned, signed, signClass, yesNo } from "@/lib/format";
+import { date, money, num, pct, price, pts, ptsSigned, signed, signClass, yesNo, companyHref } from "@/lib/format";
 import { EmptyState } from "@/components/EmptyState";
 import { HoldingsTable, RulesTable } from "@/components/HoldingsTable";
 import { Meter } from "@/components/Meter";
@@ -338,7 +338,7 @@ export default async function PortfolioPage() {
                   <ul className="flex flex-col gap-1.5 text-[13px]">
                     {memo.key_bets.map((b, i) => (
                       <li key={`${b.ticker}-${i}`} className="flex gap-2">
-                        <Link href={`/companies/${b.ticker}`} className="mono shrink-0 font-medium hover:text-accent">
+                        <Link href={companyHref(b.ticker)} className="mono shrink-0 font-medium hover:text-accent">
                           {b.ticker}
                         </Link>
                         <span className="text-muted">{b.why}</span>
@@ -410,7 +410,7 @@ export default async function PortfolioPage() {
                 {alerts.map((a, i) => (
                   <tr key={`${a.ticker}-${i}`} className="align-top">
                     <td>
-                      <Link href={`/companies/${a.ticker}`} className="font-medium">
+                      <Link href={companyHref(a.ticker)} className="font-medium">
                         {a.ticker}
                       </Link>
                     </td>
@@ -479,7 +479,7 @@ export default async function PortfolioPage() {
                   <tr key={`${t.action}-${t.ticker}-${i}`}>
                     <td className={`font-semibold ${ACTION_CLASS[t.action] ?? "text-muted"}`}>{t.action}</td>
                     <td>
-                      <Link href={`/companies/${t.ticker}`} className="font-medium">
+                      <Link href={companyHref(t.ticker)} className="font-medium">
                         {t.ticker}
                       </Link>
                     </td>
@@ -511,7 +511,7 @@ export default async function PortfolioPage() {
                 {p.exits.map((e, i) => (
                   <li key={`${e.ticker}-${i}`}>
                     <div className="flex flex-wrap items-baseline gap-x-3 text-[13px]">
-                      <Link href={`/companies/${e.ticker}`} className="mono font-medium hover:text-accent">
+                      <Link href={companyHref(e.ticker)} className="mono font-medium hover:text-accent">
                         {e.ticker}
                       </Link>
                       <span className="text-muted">{e.name ?? ""}</span>
@@ -682,7 +682,7 @@ export default async function PortfolioPage() {
                             <td>
                               <div className="flex flex-wrap gap-x-2 gap-y-0.5 whitespace-normal">
                                 {c.members.map((t) => (
-                                  <Link key={t} href={`/companies/${t}`} className="font-medium">
+                                  <Link key={t} href={companyHref(t)} className="font-medium">
                                     {t}
                                   </Link>
                                 ))}
@@ -785,7 +785,7 @@ export default async function PortfolioPage() {
                 {(p.watchlist ?? []).map((w) => (
                   <tr key={w.ticker}>
                     <td>
-                      <Link href={`/companies/${w.ticker}`} className="font-medium">
+                      <Link href={companyHref(w.ticker)} className="font-medium">
                         {w.ticker}
                       </Link>
                     </td>
@@ -820,7 +820,7 @@ export default async function PortfolioPage() {
                 {(p.skipped ?? []).map((k, i) => (
                   <tr key={`${k.ticker}-${i}`}>
                     <td>
-                      <Link href={`/companies/${k.ticker}`} className="font-medium">
+                      <Link href={companyHref(k.ticker)} className="font-medium">
                         {k.ticker}
                       </Link>
                     </td>
@@ -856,7 +856,7 @@ export default async function PortfolioPage() {
                 {(p.rejected_technical ?? []).map((k, i) => (
                   <tr key={`${k.ticker}-${i}`}>
                     <td>
-                      <Link href={`/companies/${k.ticker}`} className="font-medium">
+                      <Link href={companyHref(k.ticker)} className="font-medium">
                         {k.ticker}
                       </Link>
                     </td>

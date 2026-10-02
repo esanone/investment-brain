@@ -84,13 +84,18 @@ class Fact:
     filed: date | None
 
 
+_throttle_lock = __import__("threading").Lock()
+
+
 def _throttle() -> None:
     global _last_request
     gap = 1.0 / max(settings.sec_requests_per_second, 0.5)
-    wait = _last_request + gap - time.monotonic()
+    with _throttle_lock:   # reserve a slot under the lock, sleep outside it, so threads share one request budget
+        slot = max(_last_request + gap, time.monotonic())
+        _last_request = slot
+    wait = slot - time.monotonic()
     if wait > 0:
         time.sleep(wait)
-    _last_request = time.monotonic()
 
 
 def load_ticker_map() -> dict[str, dict]:

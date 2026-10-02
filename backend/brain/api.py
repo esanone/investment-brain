@@ -138,7 +138,7 @@ def theme(theme_id: str, run_id: Optional[str] = None) -> dict:
 
 
 @app.get("/api/companies")
-def companies(sector: Optional[str] = None, sort: str = Query("total"), limit: int = 500, run_id: Optional[str] = None) -> list[dict]:
+def companies(sector: Optional[str] = None, sort: str = Query("total"), limit: int = 2000, run_id: Optional[str] = None) -> list[dict]:
     rows = [_company_row(p) for p in _snaps("company", None, run_id)]
     att = _latest_attention()
     amap = {c["ticker"]: c for c in (att or {}).get("companies", [])}
@@ -403,6 +403,29 @@ def trigger_attention(background: BackgroundTasks) -> dict:
 @app.get("/api/portfolio")
 def portfolio(run_id: Optional[str] = None) -> dict:
     return _one("portfolio", "", run_id)
+
+
+@app.get("/api/hindcast")
+def hindcast() -> dict:
+    from .pipeline import load_prior
+    h = load_prior("hindcast")
+    if not h:
+        raise HTTPException(404, "No hindcast yet. Run: python -m brain.hindcast")
+    return h
+
+
+@app.get("/api/etf-book")
+def etf_book(run_id: Optional[str] = None) -> dict:
+    return _one("etf_book", "", run_id)
+
+
+@app.get("/api/etf-book/history")
+def etf_book_history() -> list[dict]:
+    with session_scope() as s:
+        rows = s.execute(select(Snapshot).where(Snapshot.kind == "etf_book").order_by(desc(Snapshot.id)).limit(60)).scalars()
+        return [{"run_id": x.run_id, "as_of": x.as_of.isoformat(), "mode": x.payload.get("cadence", {}).get("mode"), "positions": len(x.payload.get("holdings", [])),
+                 "cash_weight": x.payload.get("cash_weight"), "nav_index": x.payload.get("nav_index"), "drawdown_pct": x.payload.get("drawdown_pct"),
+                 "trades": len(x.payload.get("trades", [])), "holdings": [h["symbol"] for h in x.payload.get("holdings", [])]} for x in rows]
 
 
 @app.get("/api/portfolio/history")

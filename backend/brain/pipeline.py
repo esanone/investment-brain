@@ -18,7 +18,7 @@ from .config import settings
 from .data import edgar, fred, prices as price_src
 from .db import init_db, session_scope
 from .engines import flows as flows_engine, fundamentals as fund_engine, regime as regime_engine
-from .engines import portfolio as portfolio_engine, risk as risk_engine, strategist, themes as theme_engine
+from .engines import etf_book as etf_engine, portfolio as portfolio_engine, risk as risk_engine, strategist, themes as theme_engine
 from .llm import enrich_thesis, portfolio_memo, provider as llm_provider
 from .models import AttentionObservation, Company, FilingEvent, Fundamental, InsiderTransaction, Instrument, MacroObservation, Price, Snapshot, Theme, ThemeExposure
 from .universe import COMPANIES, INSTRUMENTS, company_tickers
@@ -60,22 +60,41 @@ def ingest_macro() -> None:
     log(f"macro: {len(series)} series stored")
 
 
-def ingest_prices(symbols: list[str]) -> None:
+def ingest_prices(symbols: list[str], workers: int = 4) -> None:
+    """Fetch in a small thread pool (the network is the bottleneck), write from this thread."""
+    from concurrent.futures import ThreadPoolExecutor
     price_src.register_etfs([sym for sym, (_, g, _) in INSTRUMENTS.items() if g != "crypto" and sym != "^VIX"])
     ok = 0
-    with session_scope() as s:
-        for i, sym in enumerate(symbols, 1):
-            df = price_src.fetch_history(sym)
-            if df.empty:
+
+    def fetch(sym):
+        try:
+            return sym, price_src.fetch_history(sym)
+        except Exception as e:  # one bad symbol must not stop the run
+            log(f"prices: {sym} failed: {e}")
+            return sym, None
+
+    with session_scope() as s, ThreadPoolExecutor(max_workers=workers) as ex:
+        for i, (sym, df) in enumerate(ex.map(fetch, symbols), 1):
+            if df is None or df.empty:
                 continue
             s.execute(delete(Price).where(Price.symbol == sym))
             s.bulk_insert_mappings(Price, [{"symbol": sym, "date": r.date.date(), "open": float(r.open), "high": float(r.high), "low": float(r.low),
                                             "close": float(r.close), "adj_close": float(r.adj_close), "volume": float(r.volume)} for r in df.itertuples()])
             ok += 1
-            if i % 25 == 0:
+            if i % 50 == 0:
                 s.commit()
                 log(f"prices: {i}/{len(symbols)}")
     log(f"prices: {ok}/{len(symbols)} symbols stored")
+
+
+def fundamentals_due(tickers: list[str], priority: set[str], today: Optional[date] = None) -> list[str]:
+    """Filings change quarterly, so the wide universe refreshes on a rolling weekly schedule (one fifth per weekday);
+    holdings, top-ranked names and anything with no stored filings refresh every run."""
+    import zlib
+    today = today or date.today()
+    with session_scope() as s:
+        have = {x[0] for x in s.execute(select(Fundamental.ticker).distinct())}
+    return [t for t in tickers if t in priority or t not in have or zlib.crc32(t.encode()) % 5 == today.weekday() % 5]
 
 
 def ingest_fundamentals(tickers: list[str]) -> None:
@@ -467,23 +486,25 @@ def run_events(lookback_days: int = 45) -> dict:
         known_8k = {x[0] for x in s.execute(select(FilingEvent.accession))}
     log(f"events: scanning EDGAR for {len(companies)} companies (Form 4 + 8-K since {since})")
     new_tx, new_8k, n_f4 = [], [], 0
-    for i, (t, c) in enumerate(companies.items(), 1):
+
+    def scan(item):
+        t, c = item
         try:
-            f4s = EE.recent_filings(c["cik"], ("4", "4/A"), since)
-            for f in f4s:
-                if f["accession"] in known_f4:
-                    continue
-                for tx in EE.form4_transactions(c["cik"], f):
-                    new_tx.append({**tx, "ticker": t})
-                known_f4.add(f["accession"]); n_f4 += 1
-            for f in EE.recent_filings(c["cik"], ("8-K", "8-K/A"), since):
-                if f["accession"] not in known_8k:
-                    new_8k.append({"accession": f["accession"], "ticker": t, "form": f["form"], "filed": f["filed"], "items": f["items"] or "", "url": f["url"]})
-                    known_8k.add(f["accession"])
+            f4s = [f for f in EE.recent_filings(c["cik"], ("4", "4/A"), since) if f["accession"] not in known_f4]
+            txs_ = [{**tx, "ticker": t} for f in f4s for tx in EE.form4_transactions(c["cik"], f)]
+            k8 = [{"accession": f["accession"], "ticker": t, "form": f["form"], "filed": f["filed"], "items": f["items"] or "", "url": f["url"]}
+                  for f in EE.recent_filings(c["cik"], ("8-K", "8-K/A"), since) if f["accession"] not in known_8k]
+            return txs_, k8, len(f4s)
         except Exception as e:
             log(f"events: {t}: {e}")
-        if i % 40 == 0:
-            log(f"events: {i}/{len(companies)} companies, {n_f4} new Form 4s so far")
+            return [], [], 0
+
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=4) as ex:   # EDGAR calls share one throttle (see data/edgar.py)
+        for i, (txs_, k8, n) in enumerate(ex.map(scan, companies.items()), 1):
+            new_tx += txs_; new_8k += k8; n_f4 += n
+            if i % 100 == 0:
+                log(f"events: {i}/{len(companies)} companies, {n_f4} new Form 4s so far")
     with session_scope() as s:
         for tx in new_tx:
             s.add(InsiderTransaction(accession=tx["accession"], ticker=tx["ticker"], filed=date.fromisoformat(tx["filed"]), date=date.fromisoformat(tx["date"][:10]),
@@ -522,7 +543,12 @@ def run_attention() -> dict:
     init_db()
     t0 = time.time()
     with session_scope() as s:
-        companies = {c.ticker: {"ticker": c.ticker, "name": c.name, "sector": c.sector} for c in s.execute(select(Company)).scalars()}
+        # Attention is read for the thematic universe plus whatever the book holds or ranks highly; the index-wide
+        # names stay out (one Wikipedia + one Stocktwits call each would triple the morning run for little signal).
+        prior_pf, prior_run = load_prior("portfolio") or {}, load_prior("meta") or {}
+        keep = {h["ticker"] for h in prior_pf.get("holdings", [])} | set((prior_run.get("ranked_tickers") or [])[:60])
+        companies = {c.ticker: {"ticker": c.ticker, "name": c.name, "sector": c.sector} for c in s.execute(select(Company)).scalars()
+                     if c.source != "index" or c.ticker in keep}
         history = pd.read_sql(select(AttentionObservation), s.connection())
         run_id = _latest_run_id(s)
         comp_snaps = [x.payload for x in s.execute(select(Snapshot).where(Snapshot.run_id == run_id, Snapshot.kind == "company")).scalars()] if run_id else []
@@ -549,7 +575,7 @@ def _latest_run_id(s) -> Optional[str]:
 
 
 # ------------------------------------------------------------------ compute
-def compute_all(frames: dict, as_of: date, use_llm: bool, llm_top_n: Optional[int] = None, force_enrich: bool = False) -> dict:
+def compute_all(frames: dict, as_of: date, use_llm: bool, llm_top_n: Optional[int] = None, force_enrich: bool = False, fresh: bool = False) -> dict:
     llm_top_n = llm_top_n or settings.llm_top_n
     companies, prices, macro = frames["companies"], frames["prices"], frames["macro"]
     log("engine: economic regime")
@@ -564,9 +590,12 @@ def compute_all(frames: dict, as_of: date, use_llm: bool, llm_top_n: Optional[in
     log(f"engine: fundamentals for {len(companies)} companies")
     analyses = {}
     from .data.prices import nasdaq_market_cap
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=6) as ex:   # one quote call per company; cached for a day
+        caps = dict(zip(companies, ex.map(nasdaq_market_cap, list(companies))))
     for t in companies:
         a = fund_engine.analyze_company(t, frames["fundamentals"].get(t), prices.get(t), as_of, sector=companies[t]["sector"],
-                                        market_cap_override=nasdaq_market_cap(t))
+                                        market_cap_override=caps.get(t))
         if a:
             analyses[t] = a
     scores = fund_engine.score_universe(analyses, companies, prices.get("SPY"))
@@ -591,7 +620,7 @@ def compute_all(frames: dict, as_of: date, use_llm: bool, llm_top_n: Optional[in
     risk = risk_engine.compute(prices, macro, flows, regime, list(companies), as_of)
     log(f"engine: risk = {risk['label']} ({risk['risk_score']})")
 
-    prior_pf, prior_flows = load_prior("portfolio"), load_prior("flows")
+    prior_pf, prior_flows = (None if fresh else load_prior("portfolio")), load_prior("flows")
     from .engines.technicals import trend_template
     technicals = {t: trend_template(prices.get(t), prices.get("SPY")) for t in analyses}
     technicals = {t: v for t, v in technicals.items() if v}
@@ -675,7 +704,11 @@ def compute_all(frames: dict, as_of: date, use_llm: bool, llm_top_n: Optional[in
             portfolio["memo"] = memo
             log("llm: portfolio memo written")
 
-    return {"regime": regime, "flows": flows, "themes": themes, "analyses": analyses, "scores": scores,
+    etf = etf_engine.compute(prices, frames["instruments"], regime, flows, risk, longterm, graph, None if fresh else load_prior("etf_book"),
+                             settings.portfolio_value, as_of)
+    log(f"engine: ETF book = {etf['stats']['positions'] if 'stats' in etf else len(etf['holdings'])} ETFs, cash {etf.get('cash_weight', 0):.0%}, "
+        f"mode {etf['cadence']['mode']}: " + ", ".join(f"{h['symbol']} {h['weight']:.0%}" for h in etf["holdings"][:8]))
+    return {"etf_book": etf, "regime": regime, "flows": flows, "themes": themes, "analyses": analyses, "scores": scores,
             "strategies": strategies, "ranked": ranked, "risk": risk, "portfolio": portfolio, "technicals": technicals, "pm_detail": pm_detail}
 
 
@@ -687,6 +720,7 @@ def persist(results: dict, frames: dict, as_of: date) -> str:
         s.add(Snapshot(run_id=run_id, kind="flows", key="", as_of=as_of, payload=results["flows"]))
         s.add(Snapshot(run_id=run_id, kind="risk", key="", as_of=as_of, payload=results["risk"]))
         s.add(Snapshot(run_id=run_id, kind="portfolio", key="", as_of=as_of, payload=results["portfolio"]))
+        s.add(Snapshot(run_id=run_id, kind="etf_book", key="", as_of=as_of, payload=results["etf_book"]))
         for th in results["themes"]:
             s.add(Snapshot(run_id=run_id, kind="theme", key=th["id"], as_of=as_of, payload=th))
         for t, st in results["strategies"].items():
@@ -701,12 +735,13 @@ def persist(results: dict, frames: dict, as_of: date) -> str:
             "llm_provider": llm_provider(), "universe_limit": settings.universe_limit,
             "portfolio_positions": results["portfolio"]["stats"]["positions"], "portfolio_trades": len(results["portfolio"]["trades"]),
             "top": [{"ticker": x["ticker"], "opportunity": x["opportunity_score"], "gap": x["expectations_gap"]} for x in results["ranked"][:10]],
+            "ranked_tickers": [x["ticker"] for x in results["ranked"][:80]],
         }))
     return run_id
 
 
 # ------------------------------------------------------------------ CLI
-def run(limit: Optional[int] = None, skip_ingest: bool = False, use_llm: bool = True, as_of: Optional[date] = None, force_enrich: bool = False) -> str:
+def run(limit: Optional[int] = None, skip_ingest: bool = False, use_llm: bool = True, as_of: Optional[date] = None, force_enrich: bool = False, fresh: bool = False) -> str:
     t0 = time.time()
     init_db()
     limit = limit or settings.universe_limit
@@ -716,10 +751,15 @@ def run(limit: Optional[int] = None, skip_ingest: bool = False, use_llm: bool = 
     if not skip_ingest:
         ingest_macro()
         ingest_prices(list(INSTRUMENTS) + tickers)
-        ingest_fundamentals(tickers)
+        prior_pf, prior_run = load_prior("portfolio") or {}, load_prior("meta") or {}
+        priority = {h["ticker"] for h in prior_pf.get("holdings", [])} | {w["ticker"] for w in prior_pf.get("watchlist", []) if isinstance(w, dict) and w.get("ticker")}
+        priority |= set((prior_run.get("ranked_tickers") or [])[:60])
+        due = fundamentals_due(tickers, priority)
+        log(f"edgar: {len(due)}/{len(tickers)} companies due for a filings refresh today")
+        ingest_fundamentals(due)
     frames = load_frames(tickers)
     as_of = as_of or date.today()
-    results = compute_all(frames, as_of, use_llm, force_enrich=force_enrich)
+    results = compute_all(frames, as_of, use_llm, force_enrich=force_enrich, fresh=fresh)
     run_id = persist(results, frames, as_of)
     log(f"done: run {run_id} in {time.time() - t0:.0f}s; top: " +
         ", ".join(f"{x['ticker']} {x['opportunity_score']} (gap {x['expectations_gap']:+.0f})" for x in results["ranked"][:8] if x["expectations_gap"] is not None))
@@ -742,6 +782,7 @@ def main() -> None:
     ap.add_argument("--no-llm", action="store_true")
     ap.add_argument("--as-of", type=str, default=None)
     ap.add_argument("--enrich", action="store_true", help="run: force LLM enrichment even on a monitor day")
+    ap.add_argument("--fresh", action="store_true", help="run: rebuild the portfolio from scratch (ignore the prior book; entry prices reset to today)")
     a = ap.parse_args()
     if a.cmd == "attention":
         run_attention()
@@ -805,7 +846,7 @@ def main() -> None:
         ingest_prices(list(INSTRUMENTS) + tickers)
         ingest_fundamentals(tickers)
     else:
-        run(a.limit, a.skip_ingest, not a.no_llm, date.fromisoformat(a.as_of) if a.as_of else None, force_enrich=a.enrich)
+        run(a.limit, a.skip_ingest, not a.no_llm, date.fromisoformat(a.as_of) if a.as_of else None, force_enrich=a.enrich, fresh=a.fresh)
 
 
 if __name__ == "__main__":

@@ -4,9 +4,12 @@ import type {
   BriefHistoryRow,
   CompanyDetail,
   CompanyRow,
+  EtfBook,
+  EtfBookHistoryRow,
   Events,
   Flows,
   Health,
+  Hindcast,
   Overview,
   Portfolio,
   PortfolioHistoryRow,
@@ -125,6 +128,12 @@ export const api = {
   company: (ticker: string) => get<CompanyDetail>(`/api/companies/${encodeURIComponent(ticker.toUpperCase())}`),
   portfolio: () => get<Portfolio>("/api/portfolio"),
   portfolioHistory: () => get<PortfolioHistoryRow[]>("/api/portfolio/history"),
+  /** ETF-only alternative book. 404s until the first pipeline run that builds it. */
+  etfBook: () => get<EtfBook>("/api/etf-book"),
+  /** Per-run ETF-book summaries, newest first. */
+  etfBookHistory: () => get<EtfBookHistoryRow[]>("/api/etf-book/history"),
+  /** Point-in-time hindcast of the signals and rules. 404s until `python -m brain.hindcast` has run. */
+  hindcast: () => get<Hindcast>("/api/hindcast"),
   runs: () => get<RunRow[]>("/api/runs"),
   /** Ticker/name search: universe first, then the SEC registry (`in_universe: false`). */
   search: (q: string, limit = 12, signal?: AbortSignal) => {

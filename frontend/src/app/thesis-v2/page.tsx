@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import type { ThesisV2CalibrationBin, ThesisV2Candidate } from "@/lib/types";
-import { date, num } from "@/lib/format";
+import { date, num, companyHref } from "@/lib/format";
 import { EmptyState } from "@/components/EmptyState";
 import { PageHeader } from "@/components/PageHeader";
 import { ProbabilityRange } from "@/components/ProbabilityRange";
@@ -124,7 +124,7 @@ export default async function ThesisV2LedgerPage() {
                 return (
                   <article key={`${ticker}-${i}`} className="flex min-w-0 flex-col gap-1.5 rounded border border-line bg-surface-2 px-3 py-2.5">
                     <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                      <Link href={`/companies/${ticker}`} className="mono text-[13px] font-semibold hover:text-accent">
+                      <Link href={companyHref(ticker)} className="mono text-[13px] font-semibold hover:text-accent">
                         {ticker}
                       </Link>
                       {c?.name && <span className="min-w-0 flex-1 truncate text-[12px] text-muted">{c.name}</span>}
@@ -193,7 +193,7 @@ export default async function ThesisV2LedgerPage() {
                     return (
                       <tr key={l.ticker} className="align-top">
                         <td>
-                          <Link href={`/companies/${l.ticker}`} className="mono font-medium">
+                          <Link href={companyHref(l.ticker)} className="mono font-medium">
                             {l.ticker}
                           </Link>
                         </td>

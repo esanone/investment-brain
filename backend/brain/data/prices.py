@@ -83,7 +83,7 @@ def _nasdaq(symbol: str, range_: str, asset_class: str | None = None) -> pd.Data
     end = date.today()
     start = end - timedelta(days=_range_days(range_))
     text = cached_get(
-        f"https://api.nasdaq.com/api/quote/{symbol}/historical",
+        f"https://api.nasdaq.com/api/quote/{symbol.replace('-', '.') if asset_class == 'stocks' else symbol}/historical",   # class shares: BRK-B -> BRK.B
         namespace="prices_nasdaq", key=f"{symbol}_{range_}", ttl_hours=12,
         headers={"User-Agent": _BROWSER_UA, "Accept": "application/json", "Accept-Language": "en-US,en;q=0.9"},
         params={"assetclass": asset_class, "fromdate": start.isoformat(), "todate": end.isoformat(), "limit": 9999},
@@ -155,7 +155,7 @@ def nasdaq_market_cap(symbol: str) -> Optional[float]:
     """Market cap from Nasdaq's quote summary (key-free). The authority for share counts, since XBRL cover-page
     counts are missing or per-class for multi-class filers (Visa, Interactive Brokers, Simon Property)."""
     try:
-        text = cached_get(f"https://api.nasdaq.com/api/quote/{symbol}/summary", namespace="nasdaq_summary", key=f"{symbol}_{date.today():%Y%m%d}",
+        text = cached_get(f"https://api.nasdaq.com/api/quote/{symbol.replace('-', '.')}/summary", namespace="nasdaq_summary", key=f"{symbol}_{date.today():%Y%m%d}",
                           ttl_hours=24, headers={"User-Agent": _BROWSER_UA, "Accept": "application/json"}, params={"assetclass": "stocks"})
         v = (((json.loads(text).get("data") or {}).get("summaryData") or {}).get("MarketCap") or {}).get("value")
         time.sleep(0.2)

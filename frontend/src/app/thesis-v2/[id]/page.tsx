@@ -2,7 +2,7 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 import { IS_STATIC } from "@/lib/static";
 import { MECHANISM_KEYS, SCENARIO_KEYS } from "@/lib/types";
-import { MECHANISM_LABELS, date, num, pct, signed, signClass } from "@/lib/format";
+import { MECHANISM_LABELS, date, num, pct, signed, signClass, companyHref } from "@/lib/format";
 import { AnaloguesTable, SIMILARITY_CUTOFF } from "@/components/AnaloguesTable";
 import { EmptyState } from "@/components/EmptyState";
 import { EvidenceTable } from "@/components/EvidenceTable";
@@ -418,7 +418,7 @@ export default async function ThesisV2Page({ params }: { params: Promise<{ id: s
                       <div className="flex max-w-48 flex-wrap gap-1 whitespace-normal">
                         {v.tickers?.length ? (
                           v.tickers.map((tk) => (
-                            <Link key={tk} href={`/companies/${tk}`} className="chip mono hover:text-accent">
+                            <Link key={tk} href={companyHref(tk)} className="chip mono hover:text-accent">
                               {tk}
                             </Link>
                           ))

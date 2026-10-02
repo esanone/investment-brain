@@ -140,3 +140,52 @@ def test_human_futures_ranking_scales_conviction():
     assert conv["C"] > conv0["C"] and abs(conv["C"] / conv0["C"] - 1.35) < 0.02
     assert conv["A"] < conv0["A"] and abs(conv["A"] / conv0["A"] - 0.80) < 0.02
     assert next(h for h in pf["holdings"] if h["ticker"] == "C")["hfe_mult"] == 1.35
+
+
+def test_incumbents_face_the_same_valuation_gate_at_recalibration():
+    import pandas as pd, numpy as np
+    companies, strategies, analyses, scores = _universe()
+    first = portfolio.compute(strategies, analyses, scores, companies, RISK, FLOWS, REGIME, THEMES, None, 100_000, date(2026, 9, 1))
+    held = first["holdings"][0]["ticker"]
+    # next month: give the incumbent full valuation data that implies a price far above fair value
+    a = dict(analyses[held]); a["price"] = 100.0
+    a["latest"] = dict(a["latest"], net_income=1.0, ebitda=2.0, revenue=10.0, fcf=1.0, net_debt=0.0)
+    a["valuation"] = {"market_cap": 1000.0, "history_median": {"pe": 15.0, "ev_ebitda": 8.0, "ev_sales": 1.5, "p_fcf": 20.0}}
+    a["history"] = [dict(net_income=1.0, ebitda=2.0, revenue=10.0, fcf=1.0)] * 8
+    analyses[held] = a
+    idx = pd.date_range("2025-01-01", periods=300, freq="B")
+    px = pd.DataFrame({"date": idx, "adj_close": np.linspace(80, 100, 300), "close": np.linspace(80, 100, 300)})
+    pm_inputs = {"prices": {held: px, "SPY": px}, "sector_etf": {}, "sector_medians": {}, "earnings_week": []}
+    second = portfolio.compute(strategies, analyses, scores, companies, RISK, FLOWS, REGIME, THEMES, first, 100_000, date(2026, 10, 1), FLOWS, pm_inputs=pm_inputs)
+    assert any(e["ticker"] == held and "Valuation exit" in e["reason"] for e in second["exits"])
+    assert all(h["ticker"] != held for h in second["holdings"])
+
+
+def test_expected_return_bear_below_price_and_low_confidence_flag():
+    from brain.engines import pm
+    hist = [{"net_income": 100.0, "ebitda": 150.0, "revenue": 1000.0, "fcf": 90.0} for _ in range(8)]
+    a = {"latest": {"net_income": 100.0, "ebitda": 150.0, "revenue": 1000.0, "fcf": 90.0, "net_debt": 0.0}, "history": hist, "price": 10.0,
+         "valuation": {"market_cap": 1000.0, "history_median": {"pe": 30.0, "ev_ebitda": 20.0, "ev_sales": 3.0, "p_fcf": 33.0}}}
+    er = pm.expected_return(a, {"pe": 28.0, "ev_ebitda": 19.0, "ev_sales": 3.0, "p_fcf": 30.0}, None)
+    assert er["bear"] <= 8.5                      # never above 85% of today's price
+    assert er["confidence"] == "low" and er["score"] <= 75
+    a["price"], a["valuation"]["market_cap"] = 30.0, 3000.0
+    er2 = pm.expected_return(a, {"pe": 28.0, "ev_ebitda": 19.0, "ev_sales": 3.0, "p_fcf": 30.0}, None)
+    assert er2["confidence"] == "normal"
+
+
+def test_fundamentals_refresh_rotates_through_the_week():
+    from datetime import date
+    import zlib
+    tickers = [f"T{i}" for i in range(200)]
+    days = [date(2026, 10, 5 + k) for k in range(5)]   # Mon..Fri
+    seen = set()
+    for d in days:
+        seen |= {t for t in tickers if zlib.crc32(t.encode()) % 5 == d.weekday() % 5}
+    assert seen == set(tickers)
+
+
+def test_hindcast_perf_reports_fractions():
+    from brain.hindcast import _perf
+    p = _perf([0.10, -0.05, 0.10, 0.10], 4)
+    assert 0.2 < p["cagr"] < 0.3 and -0.06 < p["max_drawdown"] <= -0.049

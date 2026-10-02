@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { api } from "@/lib/api";
-import { date, num, pct } from "@/lib/format";
+import { date, num, pct, companyHref } from "@/lib/format";
 import { EmptyState } from "@/components/EmptyState";
 import { Meter } from "@/components/Meter";
 import { PageHeader } from "@/components/PageHeader";
@@ -229,7 +229,7 @@ export default async function ThesisPage() {
                 {(t.not_priced_candidates ?? []).map((c, i) => (
                   <tr key={`${c.ticker}-${i}`} className="align-top">
                     <td>
-                      <Link href={`/companies/${c.ticker}`} className="mono font-medium">
+                      <Link href={companyHref(c.ticker)} className="mono font-medium">
                         {c.ticker}
                       </Link>
                     </td>

@@ -5,10 +5,11 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { IS_STATIC, staticSearch } from "@/lib/static";
 import type { SearchResult } from "@/lib/types";
+import { companyHref } from "@/lib/format";
 
 type Status = "idle" | "loading" | "ready" | "unavailable";
 
-/** Anything that looks like a bare ticker: lets Enter fall through to /companies/X even when search is down. */
+/** Anything that looks like a bare ticker: lets Enter fall through to the company page even when search is down. */
 const TICKER_RE = /^[A-Z][A-Z0-9.\-]{0,7}$/;
 
 /**
@@ -97,7 +98,7 @@ export function TickerSearch({ className = "", align = "left" }: { className?: s
       setOpen(false);
       setQuery("");
       inputRef.current?.blur();
-      router.push(`/companies/${encodeURIComponent(ticker.toUpperCase())}`);
+      router.push(companyHref(ticker.toUpperCase()));
     },
     [router, setQuery],
   );

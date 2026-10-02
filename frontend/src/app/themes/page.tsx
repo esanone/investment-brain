@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { api } from "@/lib/api";
-import { num, signed, signClass } from "@/lib/format";
+import { num, signed, signClass, companyHref } from "@/lib/format";
 import { EmptyState } from "@/components/EmptyState";
 import { PageHeader } from "@/components/PageHeader";
 import { ScoreBadge } from "@/components/ScoreBadge";
@@ -76,7 +76,7 @@ export default async function ThemesPage() {
                     {(t.top_members ?? []).map((m, i) => (
                       <span key={m.ticker}>
                         {i > 0 && ", "}
-                        <Link href={`/companies/${m.ticker}`}>{m.ticker}</Link>
+                        <Link href={companyHref(m.ticker)}>{m.ticker}</Link>
                       </span>
                     ))}
                   </td>

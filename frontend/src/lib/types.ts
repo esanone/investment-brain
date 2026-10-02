@@ -1764,3 +1764,188 @@ export interface Events {
   gaps: EventGap[];
   method: string;
 }
+
+// ---------------------------------------------------------------- ETF book
+/** 10-month (210-day) trend read for one ETF (etf_book.py `_trend`). Returns and distance are percent points. */
+export interface EtfTrend {
+  last: Num;
+  sma: Num;
+  above: boolean;
+  dist_pct: Num;
+  ret_1m: Num;
+  ret_3m: Num;
+  ret_12m: Num;
+}
+
+/** One scored ETF (etf_book.py `compute` rows). Scores and components are 0-100. */
+export interface EtfRow {
+  symbol: string;
+  name: string;
+  group: string;
+  sector: string | null;
+  score: Num;
+  components: { flow: Num; regime: Num; theme: Num; momentum: Num };
+  /** Name of the long-term theme the ETF is tied to, when any. */
+  theme: string | null;
+  trend: EtfTrend;
+  /** Above its 10-month average. */
+  eligible: boolean;
+}
+
+export type EtfRole = "core" | "satellite" | "treasuries" | "credit" | "gold" | "commodities";
+
+export interface EtfHolding extends EtfRow {
+  /** Fraction of the book. */
+  weight: number;
+  role: EtfRole;
+  dollars: Num;
+  shares: Num;
+  entry_price: Num;
+  entered: string | null;
+  /** Percent points since entry. */
+  pnl_pct: Num;
+  status: "new" | "held";
+  prior_weight: Num;
+}
+
+export interface EtfTrade {
+  action: TradeAction;
+  symbol: string;
+  name: string;
+  from: Num;
+  to: Num;
+  reason: string;
+  dollars: Num;
+}
+
+/** Held ETF that broke its trend on a monitoring run; acted on at the next recalibration. */
+export interface EtfAlert {
+  symbol: string;
+  name: string;
+  weight: Num;
+  alert: string;
+}
+
+export interface EtfExcluded {
+  symbol: string;
+  name: string;
+  group: string;
+  dist_pct: Num;
+  score: Num;
+}
+
+export interface EtfBookStats {
+  positions: number;
+  portfolio_vol_pct: Num;
+  vol_before_targeting_pct: Num;
+  vol_scale: Num;
+  beta_spy: Num;
+  weighted_score: Num;
+  turnover: Num;
+}
+
+/** /api/etf-book: the ETF-only alternative book (etf_book.py `compute`). Weights are fractions, `*_pct` are percent points. */
+export interface EtfBook {
+  as_of: string;
+  portfolio_value: number;
+  /** RULES dict: numbers plus the nested score `weights`. */
+  rules: Record<string, number | string | boolean | Record<string, number>>;
+  is_initial: boolean;
+  cadence: { mode: "recalibrate" | "monitor"; last_recalibration: string | null; next_recalibration: string | null };
+  holdings: EtfHolding[];
+  trades: EtfTrade[];
+  alerts: EtfAlert[];
+  cash_weight: Num;
+  /** Risk-engine posture, sleeve name -> fraction (Equities, Treasuries, Cash, Gold, Credit, Commodities). */
+  sleeves: Record<string, number>;
+  /** Actual weight by holding role. */
+  by_role: Record<string, number>;
+  stats: EtfBookStats;
+  candidates: EtfRow[];
+  excluded_by_trend: EtfExcluded[];
+  nav_index: Num;
+  nav_peak: Num;
+  drawdown_pct: Num;
+  period_return_pct: Num;
+  risk_label: string | null;
+  regime: string | null;
+  prior_as_of: string | null;
+}
+
+/** Row as returned by /api/etf-book/history (newest first). */
+export interface EtfBookHistoryRow {
+  run_id: string;
+  as_of: string;
+  mode: "recalibrate" | "monitor" | null;
+  positions: number;
+  cash_weight: Num;
+  nav_index: Num;
+  drawdown_pct: Num;
+  trades: number;
+  holdings: string[];
+}
+
+// ---------------------------------------------------------------- hindcast
+/** Information coefficient of one signal at one horizon. */
+export interface HindcastIc {
+  mean_ic: Num;
+  t_stat: Num;
+  /** Fraction of anchors with a positive IC. */
+  hit_rate: Num;
+  n: Num;
+}
+
+export interface HindcastSignal {
+  name: string;
+  label: string;
+  /** Keyed by horizon, e.g. "3m". */
+  ic: Record<string, HindcastIc>;
+  /** Keyed by horizon: mean forward return (percent points) of quintiles Q1..Q5. */
+  quintiles: Record<string, Num[]>;
+}
+
+/** Fractions (0.12 = 12%) except `sharpe`. */
+export interface HindcastPerf {
+  cagr: Num;
+  max_drawdown: Num;
+  sharpe: Num;
+  turnover: Num;
+}
+
+export interface HindcastRule {
+  name: string;
+  label: string;
+  with_rule: HindcastPerf;
+  without_rule: HindcastPerf;
+  delta_note: string | null;
+}
+
+export interface HindcastCalibrationBin {
+  bin: string;
+  n: Num;
+  predicted: Num;
+  realised: Num;
+}
+
+/** /api/hindcast: point-in-time replay of the signals and rules (brain.hindcast). */
+export interface Hindcast {
+  generated_at: string;
+  config: { start: string; end: string; step_months: number; horizons_months: number[]; universe_size: number; note: string | null };
+  anchors: number;
+  signals: HindcastSignal[];
+  regime: { brier: Num; calibration: HindcastCalibrationBin[]; event?: string; window?: string; n?: number } | null;
+  rules: HindcastRule[];
+  equity_curve: { date: string; strategy: Num; benchmark: Num }[];
+  summary: {
+    cagr: Num;
+    benchmark_cagr: Num;
+    universe_cagr?: Num;
+    universe_max_drawdown?: Num;
+    max_drawdown: Num;
+    benchmark_max_drawdown: Num;
+    sharpe: Num;
+    hit_rate: Num;
+    turnover: Num;
+  };
+  caveats: string[];
+}

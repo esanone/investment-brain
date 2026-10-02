@@ -3,7 +3,7 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 import type { AttentionEntity, CompanyAttention, ThemeAttention } from "@/lib/types";
 import { isCompanyAttention } from "@/lib/types";
-import { ATTENTION_SOURCE_LABELS, date, num, pct, ptsSigned, signClass } from "@/lib/format";
+import { ATTENTION_SOURCE_LABELS, date, num, pct, ptsSigned, signClass, companyHref } from "@/lib/format";
 import { AttentionCompaniesTable } from "@/components/AttentionCompaniesTable";
 import { AttentionFlags } from "@/components/AttentionFlags";
 import { AttentionRunButton } from "@/components/AttentionRunButton";
@@ -23,7 +23,7 @@ function fmtTime(v: string | null | undefined): string {
 }
 
 function entityHref(e: AttentionEntity): string {
-  return isCompanyAttention(e) ? `/companies/${e.ticker}` : `/themes/${e.theme_id}`;
+  return isCompanyAttention(e) ? companyHref(e.ticker) : `/themes/${e.theme_id}`;
 }
 
 function entityKey(e: AttentionEntity): string {
@@ -204,7 +204,7 @@ export default async function AttentionPage() {
                   {crowded.map((c) => (
                     <tr key={c.ticker} className="bg-neg-soft/40">
                       <td>
-                        <Link href={`/companies/${c.ticker}`} className="flex items-baseline gap-2">
+                        <Link href={companyHref(c.ticker)} className="flex items-baseline gap-2">
                           <span className="mono font-medium">{c.ticker}</span>
                           <span className="max-w-56 truncate text-muted">{c.name}</span>
                         </Link>

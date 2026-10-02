@@ -10,3 +10,4 @@ pyyaml>=6,<7
 python-dotenv>=1,<2
 openai>=1.40,<3
 anthropic>=0.40
+lxml

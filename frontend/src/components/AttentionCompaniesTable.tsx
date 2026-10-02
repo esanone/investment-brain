@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { CompanyAttention, Num } from "@/lib/types";
-import { num, pct, ptsSigned, signed, signClass } from "@/lib/format";
+import { num, pct, ptsSigned, signed, signClass, companyHref } from "@/lib/format";
 import { AttentionFlags } from "./AttentionFlags";
 import { ScoreBadge } from "./ScoreBadge";
 
@@ -36,7 +36,7 @@ const COLS: Col[] = [
     label: "Ticker",
     numeric: false,
     render: (c) => (
-      <Link href={`/companies/${c.ticker}`} className="mono font-medium">
+      <Link href={companyHref(c.ticker)} className="mono font-medium">
         {c.ticker}
       </Link>
     ),
@@ -46,7 +46,7 @@ const COLS: Col[] = [
     label: "Name",
     numeric: false,
     render: (c) => (
-      <Link href={`/companies/${c.ticker}`} className="block max-w-48 truncate text-muted">
+      <Link href={companyHref(c.ticker)} className="block max-w-48 truncate text-muted">
         {c.name}
       </Link>
     ),

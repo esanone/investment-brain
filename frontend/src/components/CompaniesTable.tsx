@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { CompanyRow, Num } from "@/lib/types";
-import { money, multiple, pct, price, ptsSigned, signed, signClass } from "@/lib/format";
+import { money, multiple, pct, price, ptsSigned, signed, signClass, companyHref } from "@/lib/format";
 import { AttentionFlags } from "./AttentionFlags";
 import { ErCell } from "./PmDetail";
 import { ScoreBadge } from "./ScoreBadge";
@@ -44,7 +44,7 @@ const COLS: Col[] = [
     label: "Company",
     numeric: false,
     render: (c) => (
-      <Link href={`/companies/${c.ticker}`} className="flex items-baseline gap-2">
+      <Link href={companyHref(c.ticker)} className="flex items-baseline gap-2">
         <span className="font-medium">{c.ticker}</span>
         <span className="max-w-48 truncate text-muted">{c.name}</span>
       </Link>

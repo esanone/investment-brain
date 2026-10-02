@@ -2,7 +2,7 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 import { IS_STATIC } from "@/lib/static";
 import type { Theme } from "@/lib/types";
-import { ATTENTION_SOURCE_LABELS, num, ptsSigned, signed, signClass, weight } from "@/lib/format";
+import { ATTENTION_SOURCE_LABELS, num, ptsSigned, signed, signClass, weight, companyHref } from "@/lib/format";
 import { AttentionFlags } from "@/components/AttentionFlags";
 import { EmptyState } from "@/components/EmptyState";
 import { Meter } from "@/components/Meter";
@@ -51,7 +51,7 @@ function ChildRow({ t, depth }: { t: Theme; depth: number }) {
           {(t.members ?? []).slice(0, 6).map((m, i) => (
             <span key={m.ticker}>
               {i > 0 && ", "}
-              <Link href={`/companies/${m.ticker}`}>{m.ticker}</Link>
+              <Link href={companyHref(m.ticker)}>{m.ticker}</Link>
             </span>
           ))}
         </td>
@@ -287,10 +287,10 @@ export default async function ThemePage({ params }: { params: Promise<{ id: stri
                   return (
                     <tr key={m.ticker}>
                       <td>
-                        <Link href={`/companies/${m.ticker}`} className="font-medium">{m.ticker}</Link>
+                        <Link href={companyHref(m.ticker)} className="font-medium">{m.ticker}</Link>
                       </td>
                       <td className="text-muted">
-                        <Link href={`/companies/${m.ticker}`}>{m.name}</Link>
+                        <Link href={companyHref(m.ticker)}>{m.name}</Link>
                       </td>
                       <td className="num">{weight(m.weight)}</td>
                       <td className="num text-muted">{m.order}</td>

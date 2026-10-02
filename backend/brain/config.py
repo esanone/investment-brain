@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     # Pipeline knobs
     universe_limit: Optional[int] = None      # cap number of companies (fast dev runs)
     price_range: str = "5y"                # Yahoo range for price history
-    sec_requests_per_second: float = 5.0
+    sec_requests_per_second: float = 8.0
     http_timeout: float = 30.0
 
     # Frontend origin for CORS

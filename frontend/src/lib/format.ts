@@ -1,7 +1,19 @@
 /** Number formatting helpers. Every helper renders "—" for null/undefined/NaN. */
 import type { Num } from "./types";
+import { IS_STATIC } from "./static";
 
 export const DASH = "—";
+
+/**
+ * The one place that knows where a company page lives. Live mode renders
+ * `/companies/<TICKER>` on demand; the static export does not prerender a page
+ * per ticker (the universe is too large), so every link goes to the single
+ * client-rendered `/company/?t=<TICKER>` page instead.
+ */
+export function companyHref(ticker: string): string {
+  const t = encodeURIComponent(ticker);
+  return IS_STATIC ? `/company/?t=${t}` : `/companies/${t}`;
+}
 
 function bad(v: Num | undefined): v is null | undefined {
   return v === null || v === undefined || !Number.isFinite(v);

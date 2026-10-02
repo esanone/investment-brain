@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { DIM_KEYS, REGIME_NAMES, isCompanyAttention } from "@/lib/types";
-import { DIM_LABELS, num, pct, signed, signClass } from "@/lib/format";
+import { DIM_LABELS, num, pct, signed, signClass, companyHref } from "@/lib/format";
 import { CompanyRowsTable } from "@/components/CompanyRowsTable";
 import { DirectionChip } from "@/components/DirectionChip";
 import { DivergingBar } from "@/components/DivergingBar";
@@ -20,7 +20,7 @@ export * from "@/lib/segment-config";
 const TREND_GLYPH: Record<string, string> = { accelerating: "▲", steady: "→", decelerating: "▼" };
 
 export default async function DashboardPage() {
-  const [ov, health, briefRes, attRes, thesisRes, oppRes, eventsRes] = await Promise.all([
+  const [ov, health, briefRes, attRes, thesisRes, oppRes, eventsRes, etfRes] = await Promise.all([
     api.overview(),
     api.health(),
     api.brief(),
@@ -28,6 +28,7 @@ export default async function DashboardPage() {
     api.thesis(),
     api.thesisV2Opportunities(),
     api.events(),
+    api.etfBook(),
   ]);
   const running = health.ok ? health.data.running : false;
   // Morning brief card is optional: nothing renders until a brief has been generated.
@@ -54,6 +55,10 @@ export default async function DashboardPage() {
   const events = eventsRes.ok ? eventsRes.data : null;
   // The tape is already sorted portfolio-first then by priority; keep that order.
   const eventsTop = [...(events?.tape ?? [])].sort((a, b) => Number(b.in_portfolio) - Number(a.in_portfolio) || b.priority - a.priority).slice(0, 6);
+
+  // ETF book line is optional: nothing renders until the pipeline has built one.
+  const etf = etfRes.ok ? etfRes.data : null;
+  const etfTop = [...(etf?.holdings ?? [])].sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0)).slice(0, 5);
 
   if (!ov.ok) {
     return (
@@ -139,7 +144,7 @@ export default async function DashboardPage() {
                   <ul className="flex flex-col gap-1 text-[12.5px]">
                     {attNotPriced.map((e) => (
                       <li key={isCompanyAttention(e) ? `c-${e.ticker}` : `t-${e.theme_id}`} className="flex items-center gap-2">
-                        <Link href={isCompanyAttention(e) ? `/companies/${e.ticker}` : `/themes/${e.theme_id}`} className="min-w-0 flex-1 truncate hover:text-accent">
+                        <Link href={isCompanyAttention(e) ? companyHref(e.ticker) : `/themes/${e.theme_id}`} className="min-w-0 flex-1 truncate hover:text-accent">
                           {isCompanyAttention(e) ? <><span className="mono font-medium">{e.ticker}</span> <span className="text-muted">{e.name}</span></> : e.name}
                         </Link>
                         <span className="text-[11.5px] text-muted">pricing {num(e.pricing, 0)}</span>
@@ -157,7 +162,7 @@ export default async function DashboardPage() {
                   <ul className="flex flex-col gap-1 text-[12.5px]">
                     {attCrowded.map((c) => (
                       <li key={c.ticker} className="flex items-center gap-2">
-                        <Link href={`/companies/${c.ticker}`} className="min-w-0 flex-1 truncate hover:text-accent">
+                        <Link href={companyHref(c.ticker)} className="min-w-0 flex-1 truncate hover:text-accent">
                           <span className="mono font-medium">{c.ticker}</span> <span className="text-muted">{c.name}</span>
                         </Link>
                         <span className="text-[11.5px] text-muted">momentum {num(c.price_momentum, 0)}</span>
@@ -192,7 +197,7 @@ export default async function DashboardPage() {
               <ul className="flex flex-col gap-1 text-[12.5px]">
                 {eventsTop.map((r) => (
                   <li key={r.ticker} className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <Link href={`/companies/${r.ticker}`} className="min-w-0 flex-1 truncate hover:text-accent">
+                    <Link href={companyHref(r.ticker)} className="min-w-0 flex-1 truncate hover:text-accent">
                       <span className="mono font-medium">{r.ticker}</span> <span className="text-muted">{r.name}</span>
                       {r.in_portfolio && <span className="ml-1.5 text-[11px] text-accent">portfolio</span>}
                     </Link>
@@ -227,7 +232,7 @@ export default async function DashboardPage() {
               <ul className="flex flex-col gap-1 text-[12.5px]">
                 {oppPicks.map((c) => (
                   <li key={c.ticker} className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <Link href={`/companies/${c.ticker}`} className="min-w-0 flex-1 truncate hover:text-accent">
+                    <Link href={companyHref(c.ticker)} className="min-w-0 flex-1 truncate hover:text-accent">
                       <span className="mono font-medium">{c.ticker}</span> <span className="text-muted">{c.name}</span>
                     </Link>
                     <span className="flex flex-wrap gap-1">
@@ -389,7 +394,7 @@ export default async function DashboardPage() {
                 <div className="eyebrow mb-1">Top holdings</div>
                 <div className="flex flex-wrap gap-1.5">
                   {d.portfolio.top.map((h) => (
-                    <Link key={h.ticker} href={`/companies/${h.ticker}`} className="chip hover:text-accent">
+                    <Link key={h.ticker} href={companyHref(h.ticker)} className="chip hover:text-accent">
                       <span className="font-medium text-ink">{h.ticker}</span> {pct(h.weight, 1)}
                     </Link>
                   ))}
@@ -417,6 +422,38 @@ export default async function DashboardPage() {
                 )}
               </div>
             )}
+          </Section>
+        )}
+
+        {/* ETF BOOK */}
+        {etf && (
+          <Section
+            title="ETF book"
+            subtitle={<Link href="/etf-book" className="hover:text-accent">ETF-only alternative built from the same engines · as of {etf.as_of}</Link>}
+            className="lg:col-span-5"
+          >
+            <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
+              <div>
+                <div className="eyebrow">Positions</div>
+                <div className="text-[20px] font-semibold leading-none">{etf.stats?.positions ?? etf.holdings?.length ?? 0}</div>
+              </div>
+              <div>
+                <div className="eyebrow">Cash</div>
+                <div className="text-[20px] font-semibold leading-none">{pct(etf.cash_weight, 1)}</div>
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="eyebrow mb-1">Top holdings</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {etfTop.map((h) => (
+                    <span key={h.symbol} className="chip" title={h.name}>
+                      <span className="font-medium text-ink">{h.symbol}</span> {pct(h.weight, 1)}
+                    </span>
+                  ))}
+                  {!etfTop.length && <span className="text-[12.5px] text-muted">No ETF in trend: the book is in cash.</span>}
+                </div>
+              </div>
+              <Link href="/etf-book" className="text-[12px] text-accent hover:underline">Open the ETF book</Link>
+            </div>
           </Section>
         )}
 

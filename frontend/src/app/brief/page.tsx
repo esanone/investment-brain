@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import type { BriefAction, SignalDirection } from "@/lib/types";
-import { EPISTEMIC_LABELS, date, num, pct } from "@/lib/format";
+import { EPISTEMIC_LABELS, date, num, pct, companyHref } from "@/lib/format";
 import { BriefRunButton } from "@/components/BriefRunButton";
 import { DirectionChip } from "@/components/DirectionChip";
 import { EmptyState } from "@/components/EmptyState";
@@ -281,7 +281,7 @@ export default async function BriefPage() {
                     {(llm.ticker_signals ?? []).map((t, i) => (
                       <tr key={`${t.ticker}-${i}`} className="align-top">
                         <td>
-                          <Link href={`/companies/${t.ticker}`} className="mono font-medium">
+                          <Link href={companyHref(t.ticker)} className="mono font-medium">
                             {t.ticker}
                           </Link>
                         </td>
@@ -315,7 +315,7 @@ export default async function BriefPage() {
                     {(llm.portfolio_implications ?? []).map((p, i) => (
                       <tr key={`${p.ticker}-${i}`} className="align-top">
                         <td>
-                          <Link href={`/companies/${p.ticker}`} className="mono font-medium">
+                          <Link href={companyHref(p.ticker)} className="mono font-medium">
                             {p.ticker}
                           </Link>
                         </td>
@@ -385,7 +385,7 @@ export default async function BriefPage() {
               {mentions.map((m) => (
                 <Link
                   key={m.ticker}
-                  href={`/companies/${m.ticker}`}
+                  href={companyHref(m.ticker)}
                   title={m.name}
                   className={`chip hover:text-accent ${m.in_portfolio ? "border-accent bg-accent-soft text-accent" : ""}`}
                 >

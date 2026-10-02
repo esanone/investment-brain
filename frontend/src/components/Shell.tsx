@@ -16,12 +16,20 @@ const NAV = [
   { href: "/themes", label: "Themes" },
   { href: "/companies", label: "Companies" },
   { href: "/portfolio", label: "Portfolio" },
+  { href: "/etf-book", label: "ETF Book" },
   { href: "/risk", label: "Risk" },
+  { href: "/hindcast", label: "Hindcast" },
 ];
 
+/** Routes that belong to a nav entry without living under its path (the static export's `/company/?t=` page). */
+const ALIASES: Record<string, string> = { "/companies": "/company" };
+
 /** Match on a whole path segment so "/thesis" does not light up for "/thesis-v2". */
-function isActive(pathname: string, href: string) {
-  return href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`);
+function isActive(pathname: string, href: string): boolean {
+  if (href === "/") return pathname === "/";
+  if (pathname === href || pathname.startsWith(`${href}/`)) return true;
+  const alias = ALIASES[href];
+  return alias ? isActive(pathname, alias) : false;
 }
 
 export function Shell({ children }: { children: React.ReactNode }) {

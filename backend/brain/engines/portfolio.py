@@ -436,6 +436,19 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], scores: dict
         if pmd and not incumbent and pmd.get("expected_return") and pmd["expected_return"]["band"] in ("reduce", "exit_candidate"):
             rejected.append({"ticker": t, "reason": f"Expected return {pmd['expected_return']['expected_return_pct']}% ({pmd['expected_return']['band']}): paying too much for the thesis", "score": pmd["entry"]["score"]})
             continue
+        # Incumbents are held to the same standard at every recalibration: no grandfathering.
+        if pmd and incumbent:
+            er_i = pmd.get("expected_return")
+            why = None
+            if er_i and er_i["band"] == "exit_candidate":
+                why = f"Valuation exit: expected return {er_i['expected_return_pct']}% (fair value {er_i['base']} vs price {er_i['price']})"
+            elif (pmd["entry"]["score"] or 0) < 45:
+                why = f"Entry score {pmd['entry']['score']} below 45 ({pmd['entry']['label']})"
+            if why:
+                h0 = prior_holdings[t]; price0 = float(a.get("price") or 0); entry0 = float(h0.get("entry_price") or price0 or 1)
+                exits.append({"ticker": t, "name": h0.get("name"), "prior_weight": h0["weight"], "reason": why, "entry_price": r(entry0, 2),
+                              "exit_price": r(price0, 2), "pnl_pct": r((price0 / entry0 - 1) * 100, 1) if entry0 else None})
+                continue
         conviction = (opp - 50) * (1 + max(gap, 0) / 50)
         if pmd and pmd["entry"]["score"] is not None:
             conviction *= 0.6 + 0.8 * pmd["entry"]["score"] / 100     # entry score 60 -> x1.08, 85 -> x1.28, 45 -> x0.96
@@ -531,6 +544,9 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], scores: dict
             w = max(0.0, equity_cap - sum(x["weight"] for x in chosen))
             if w < RULES["min_weight"]:
                 skipped.append({"ticker": c["ticker"], "reason": f"Equity cap {equity_cap:.0%} reached"}); break
+        er_c = (c.get("pm") or {}).get("expected_return")
+        if c["incumbent"] and er_c and er_c["band"] in ("hold", "reduce"):
+            w = min(w, prior_holdings[c["ticker"]]["weight"])          # never add to a name whose expected return no longer justifies it
         chosen.append(dict(c, weight=w, entry_price=entry, stops=stops))
         sector_w[c["sector"]] = sector_w.get(c["sector"], 0) + w
         for k, v in c["themes"].items():

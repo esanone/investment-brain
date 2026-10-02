@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import type { EntryRule, Holding } from "@/lib/types";
-import { date, money, num, pct, price, pts, ptsSigned, signed, signClass, yesNo } from "@/lib/format";
+import { date, money, num, pct, price, pts, ptsSigned, signed, signClass, yesNo, companyHref } from "@/lib/format";
 import { ScoreBadge } from "./ScoreBadge";
 import { CatalystTable, EntryBreakdown, ErCell, MomCell, MomentumChecks, MomentumReturns, MomentumWarnings, NextCatalyst, ScenarioStrip, volText } from "./PmDetail";
 
@@ -204,7 +204,7 @@ function HoldingRow({
           </button>
         </td>
         <td>
-          <Link href={`/companies/${h.ticker}`} className="font-medium">
+          <Link href={companyHref(h.ticker)} className="font-medium">
             {h.ticker}
           </Link>
         </td>

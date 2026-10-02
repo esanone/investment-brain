@@ -195,4 +195,4 @@ def analyze(ticker: str) -> dict:
 
 def custom_tickers() -> list[str]:
     with session_scope() as s:
-        return [c.ticker for c in s.execute(select(Company).where(Company.source == "custom")).scalars()]
+        return [c.ticker for c in s.execute(select(Company).where(Company.source.in_(["custom", "index"]))).scalars()]

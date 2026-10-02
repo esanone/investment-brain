@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import type { EarningsEvent, EventGap, FilingRow, HeavySellingRow, InsiderRow, TapeRow } from "@/lib/types";
-import { date, money, num, price, ptsSigned, signClass } from "@/lib/format";
+import { date, money, num, price, ptsSigned, signClass, companyHref } from "@/lib/format";
 import { EmptyState } from "@/components/EmptyState";
 import { EventFlagChips, SeverityChip } from "@/components/EventFlagChips";
 import { EventsRunButton } from "@/components/EventsRunButton";
@@ -26,7 +26,7 @@ const FINNHUB_NOTE = "Add FINNHUB_API_KEY to backend/.env for earnings and pre-m
 
 function TickerLink({ ticker, name, inPortfolio }: { ticker: string; name?: string | null; inPortfolio?: boolean }) {
   return (
-    <Link href={`/companies/${ticker}`} className="flex items-baseline gap-2">
+    <Link href={companyHref(ticker)} className="flex items-baseline gap-2">
       <span className="mono font-medium">{ticker}</span>
       {name && <span className="max-w-56 truncate font-normal text-muted">{name}</span>}
       {inPortfolio && <PortfolioMark />}

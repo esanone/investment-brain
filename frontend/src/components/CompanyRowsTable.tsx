@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { CompanyRow } from "@/lib/types";
-import { signed, signClass } from "@/lib/format";
+import { signed, signClass, companyHref } from "@/lib/format";
 import { ScoreBadge } from "./ScoreBadge";
 
 /** Compact, non-interactive company table used on the dashboard. */
@@ -27,7 +27,7 @@ export function CompanyRowsTable({ rows, showRank = true }: { rows: CompanyRow[]
             <tr key={c.ticker}>
               {showRank && <td className="num text-subtle">{i + 1}</td>}
               <td>
-                <Link href={`/companies/${c.ticker}`} className="flex items-baseline gap-2">
+                <Link href={companyHref(c.ticker)} className="flex items-baseline gap-2">
                   <span className="font-medium">{c.ticker}</span>
                   <span className="max-w-56 truncate text-muted">{c.name}</span>
                 </Link>

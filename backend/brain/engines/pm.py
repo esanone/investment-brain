@@ -76,15 +76,23 @@ def expected_return(analysis: dict, sector_medians: dict, regime_label: Optional
         return None
     base = float(np.median(bases)); bull = base * 1.35
     bear = float(np.clip(min(bears), 0.4 * base, base))        # bear case floored at a 60% haircut to base
+    bear = min(bear, 0.85 * price)                              # a bear case is by definition below today's price
     p_bear, p_base, p_bull = {"Contraction": (0.30, 0.50, 0.20), "Stagflation": (0.30, 0.50, 0.20), "Reflation": (0.20, 0.50, 0.30)}.get(regime_label, (0.20, 0.55, 0.25))
     ev = p_bear * bear + p_base * base + p_bull * bull
     er = max(-90.0, min(150.0, (ev / price - 1) * 100))
     band = next(b for thr, b in ER_BANDS if er >= thr)
+    # When history-based multiples put fair value far above the price, the market is usually pricing a structural change
+    # (slower growth, margin pressure, a de-rating) that those multiples cannot see: keep the number, trust it less.
+    low_conf = base / price > 1.6
+    score = sigmoid_score((er - 10) / 15, k=1.0)
+    method = "normalised metrics (half current, half 8-quarter median) x blended own/sector multiples (60/40) capped at 2x sector"
+    if low_conf:
+        score = min(score, 75.0)
+        method += "; LOW CONFIDENCE: model fair value is more than 60% above the price, so the market is pricing a de-rating the multiples do not capture (score capped at 75)"
     return {"price": r(price, 2), "bear": r(bear, 2), "base": r(base, 2), "bull": r(bull, 2), "prob": [p_bear, p_base, p_bull],
             "expected_value": r(ev, 2), "expected_return_pct": r(er, 1), "band": band, "upside_base_pct": r((base / price - 1) * 100, 1),
             "downside_bear_pct": r((bear / price - 1) * 100, 1), "n_methods": len(bases),
-            "score": r(sigmoid_score((er - 10) / 15, k=1.0), 0),
-            "method": "normalised metrics (half current, half 8-quarter median) x blended own/sector multiples (60/40) capped at 2x sector"}
+            "score": r(score, 0), "confidence": "low" if low_conf else "normal", "method": method}
 
 
 # ------------------------------------------------------------------ momentum (absolute + relative)
@@ -150,7 +158,8 @@ def catalyst_score(ticker: str, strategist: dict, events_trigger: Optional[dict]
         timing = 1.0 if d <= 60 else 0.7 if d <= 180 else 0.4
         return it["impact"] / 10 * it["probability"] * timing
     raw = sum(weight(i) for i in items)
-    score = r(min(100, 100 * (1 - np.exp(-raw / 1.2))), 0)
+    # no identified catalyst is neutral-to-slightly-negative (40), not zero: sparse data must not act as a penalty
+    score = r(min(100, 40 + 60 * (1 - np.exp(-raw / 1.2))), 0)
     nxt = min((i for i in items if i.get("days") is not None and i["days"] >= 0), key=lambda i: i["days"], default=None)
     return {"score": score, "items": items[:6], "next": nxt, "n": len(items)}
 

@@ -414,6 +414,20 @@ def hindcast() -> dict:
     return h
 
 
+@app.get("/api/thesis-book")
+def thesis_book(run_id: Optional[str] = None) -> dict:
+    return _one("thesis_book", "", run_id)
+
+
+@app.get("/api/thesis-book/history")
+def thesis_book_history() -> list[dict]:
+    with session_scope() as s:
+        rows = s.execute(select(Snapshot).where(Snapshot.kind == "thesis_book").order_by(desc(Snapshot.id)).limit(60)).scalars()
+        return [{"run_id": x.run_id, "as_of": x.payload.get("as_of"), "mode": x.payload.get("cadence", {}).get("mode"), "positions": len(x.payload.get("holdings", [])),
+                 "equity_weight": x.payload.get("equity_weight"), "nav_index": x.payload.get("nav_index"),
+                 "trades": [{"action": t["action"], "ticker": t["ticker"], "to": t["to"]} for t in x.payload.get("trades", [])]} for x in rows]
+
+
 @app.get("/api/etf-book")
 def etf_book(run_id: Optional[str] = None) -> dict:
     return _one("etf_book", "", run_id)

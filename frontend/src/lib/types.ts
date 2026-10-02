@@ -1885,6 +1885,229 @@ export interface EtfBookHistoryRow {
   holdings: string[];
 }
 
+// ---------------------------------------------------------------- thesis-driven portfolio
+/** Thesis score split by source, each 0-100 (thesis_book.py `score_universe`). */
+export interface ThesisBookComponents {
+  ledger: Num;
+  structural: Num;
+  brief: Num;
+}
+
+export type ThesisDriverKind = "ledger" | "structural" | "brief";
+
+/** One reason a name is favoured by the theses. `strength` and `confidence` are fractions 0..1. */
+export interface ThesisBookDriver {
+  kind: ThesisDriverKind | string;
+  label: string | null;
+  detail: string | null;
+  strength: Num;
+  confidence: Num;
+}
+
+export type ThesisValuationPosition = "below_base" | "base_to_bull" | "above_bull" | "no_model";
+
+/** Price against the fair-value scenarios. A `no_model` row carries only `price`, `position` and `above_bull`. */
+export interface ThesisBookValuation {
+  price: Num;
+  bear?: Num;
+  base?: Num;
+  bull?: Num;
+  /** Percent points. */
+  expected_return_pct?: Num;
+  position: ThesisValuationPosition | string;
+  above_bull: boolean;
+  /** Percent points from the price up to the bull scenario (negative = already above it). */
+  pct_to_bull?: Num;
+  confidence?: "low" | "normal" | string | null;
+}
+
+export interface ThesisBookTechnical {
+  /** Trend-template criteria passed, of 8. */
+  passes: Num;
+  score: Num;
+  stage: TrendStage | string | null;
+  ready: boolean | null;
+  rsi14: Num;
+}
+
+/** Fields shared by a held position and a candidate row. Scores are 0-100, probabilities are fractions. */
+export interface ThesisBookName {
+  ticker: string;
+  name: string | null;
+  sector: string | null;
+  top_theme: string | null;
+  thesis_score: Num;
+  thesis_probability: Num;
+  components: ThesisBookComponents | null;
+  drivers: ThesisBookDriver[] | null;
+  /** Thesis-ledger ids ("T-004"), strongest first. */
+  theses: string[] | null;
+  valuation: ThesisBookValuation | null;
+  technical: ThesisBookTechnical | null;
+}
+
+export interface ThesisBookHolding extends ThesisBookName {
+  /** Fraction of the book. */
+  weight: number;
+  dollars: Num;
+  shares: Num;
+  price: Num;
+  entry_price: Num;
+  entered: string | null;
+  /** Percent points since entry. */
+  pnl_pct: Num;
+  status: "new" | "held";
+  prior_weight: Num;
+  stops: HoldingStops | null;
+  notes: string[] | null;
+  /** Only on monitoring runs: rule outcomes waiting for the next recalibration. */
+  pending_actions?: string[] | null;
+}
+
+export type ThesisCandidateStatus = "selected" | "above_bull" | "market_gate" | "sector_gate" | "trend_gate" | "earnings" | "caps" | "passed";
+
+/** A name favoured by the theses, with the gate that stopped it (or `selected`). */
+export interface ThesisBookCandidate extends ThesisBookName {
+  /** Already held going into this run. */
+  incumbent: boolean;
+  status: ThesisCandidateStatus | string;
+  reason: string | null;
+}
+
+export interface ThesisBookTrade {
+  action: TradeAction;
+  ticker: string;
+  name: string | null;
+  from: Num;
+  to: Num;
+  dollars: Num;
+  reason: string;
+}
+
+export interface ThesisBookExit {
+  ticker: string;
+  name: string | null;
+  prior_weight: Num;
+  reason: string;
+  entry_price?: Num;
+  exit_price?: Num;
+  /** Percent points from entry to exit. */
+  pnl_pct?: Num;
+}
+
+export interface ThesisBookAlert {
+  ticker: string;
+  name: string | null;
+  weight: Num;
+  alert: string;
+}
+
+/** Open thesis from the ledger with the share of the book that rests on it. */
+export interface ThesisBookThesis {
+  id: string;
+  title: string | null;
+  /** Percent points 0-100 (unlike the per-name `thesis_probability`, which is a fraction). */
+  posterior: Num;
+  horizon: string | null;
+  /** Fraction of the book held in names tied to this thesis (names can count towards several). */
+  weight: Num;
+  held: string[];
+}
+
+export interface ThesisBookShift {
+  shift: string | null;
+  /** Fraction 0..1. */
+  confidence: Num;
+  trend: string | null;
+  /** Theme names. */
+  themes: string[];
+  held: string[];
+}
+
+/** Counts through the selection funnel; every gate count is the number of favoured names it stopped. */
+export interface ThesisBookFunnel {
+  universe: Num;
+  favoured: Num;
+  headwind: Num;
+  above_bull: Num;
+  market_gate: Num;
+  sector_gate: Num;
+  trend_gate: Num;
+  earnings: Num;
+  caps: Num;
+  selected: Num;
+}
+
+export interface ThesisBookStats {
+  positions: Num;
+  weighted_thesis_score: Num;
+  /** Fraction 0..1. */
+  weighted_probability: Num;
+  portfolio_vol_pct: Num;
+  vol_before_targeting_pct: Num;
+  vol_scale: Num;
+  avg_stop_distance_pct: Num;
+  sector_weights: Record<string, number> | null;
+  theme_weights: [string, number][] | null;
+  between_base_and_bull: Num;
+  overlap_with_valuation_book: string[] | null;
+  turnover: Num;
+}
+
+/**
+ * /api/thesis-book: the thesis-driven portfolio (thesis_book.py `compute`). Weights and probabilities are fractions,
+ * `*_pct` are percent points, scores are 0-100. On monitoring runs the funnel, candidates, theses, shifts and stats
+ * are carried over from the last recalibration.
+ */
+export interface ThesisBook {
+  as_of: string;
+  portfolio_value: Num;
+  is_initial: boolean;
+  prior_as_of: string | null;
+  last_recalibration: string | null;
+  cadence: { mode: "recalibrate" | "monitor"; last_recalibration: string | null; next_recalibration: string | null } | null;
+  regime: string | null;
+  risk_label: string | null;
+  regime_gate: { open: boolean; note: string | null } | null;
+  /** From the latest morning brief. */
+  market_thesis: { direction: BriefDirection | string | null; confidence: Num; long_term: string | null; as_of: string | null } | null;
+  sources: {
+    ledger: { n_theses: Num } | null;
+    structural: { as_of: string | null; n_shifts: Num } | null;
+    briefs: { n: Num; latest: string | null } | null;
+  } | null;
+  equity_weight: Num;
+  equity_cap: Num;
+  cash_weight: Num;
+  nav_index: Num;
+  nav_peak: Num;
+  drawdown_pct: Num;
+  period_return_pct: Num;
+  /** RULES dict: numbers and strings plus the nested source `weights`. */
+  rules: ({ weights?: Partial<Record<ThesisDriverKind, number>> } & Record<string, number | string | boolean | Record<string, number> | null | undefined>) | null;
+  funnel: ThesisBookFunnel | null;
+  holdings: ThesisBookHolding[];
+  trades: ThesisBookTrade[];
+  exits: ThesisBookExit[];
+  alerts: ThesisBookAlert[];
+  /** Up to 80 favoured names, best thesis score first. */
+  candidates: ThesisBookCandidate[];
+  theses: ThesisBookThesis[];
+  shifts: ThesisBookShift[];
+  stats: ThesisBookStats | null;
+}
+
+/** Row as returned by /api/thesis-book/history (newest first). */
+export interface ThesisBookHistoryRow {
+  run_id: string;
+  as_of: string | null;
+  mode: "recalibrate" | "monitor" | null;
+  positions: Num;
+  equity_weight: Num;
+  nav_index: Num;
+  trades: { action: TradeAction; ticker: string; to: Num }[];
+}
+
 // ---------------------------------------------------------------- hindcast
 /** Information coefficient of one signal at one horizon. */
 export interface HindcastIc {

@@ -11,7 +11,7 @@ import { ScoreBadge } from "@/components/ScoreBadge";
 import { Section } from "@/components/Section";
 
 export * from "@/lib/segment-config";
-export const metadata: Metadata = { title: "Portfolio" };
+export const metadata: Metadata = { title: "Valuation-trend driven portfolio" };
 
 const ACTION_CLASS: Record<TradeAction, string> = {
   BUY: "text-pos",
@@ -149,7 +149,7 @@ export default async function PortfolioPage() {
   if (!res.ok) {
     return (
       <>
-        <PageHeader title="Model portfolio" />
+        <PageHeader title="Valuation-trend driven portfolio" />
         <EmptyState title={res.status === 404 ? "No portfolio snapshot yet" : "No data yet"} message={res.message} />
       </>
     );
@@ -179,7 +179,7 @@ export default async function PortfolioPage() {
       <PageHeader
         title={
           <span className="flex flex-wrap items-baseline gap-x-3">
-            <span>Model portfolio</span>
+            <span>Valuation-trend driven portfolio</span>
             <span className="text-[14px] font-medium text-muted">{money(p.portfolio_value, 1)}</span>
             {p.is_initial ? (
               <span className="chip border-accent bg-accent-soft text-accent">Initial portfolio</span>

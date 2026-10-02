@@ -28,6 +28,15 @@ def sic_to_sector(sic: Optional[int], desc_: str = "") -> tuple[str, str]:
     if sic is None:
         return "Industrials", d
     s = int(sic)
+    # exceptions first: electrical equipment (switchgear, motors, generators, wiring) is Industrials, not Technology
+    if 3610 <= s < 3630 or 3640 <= s < 3650 or 3690 <= s < 3700:
+        return "Industrials", d
+    if s in (2451, 2452, 8200):                    # manufactured housing, education services
+        return "Consumer Discretionary", d
+    if s == 5122:                                  # drug wholesalers
+        return "Health Care", d
+    if 4920 <= s < 4925:                           # gas pipelines / midstream
+        return "Energy", d
     if 1000 <= s < 1100 or 1400 <= s < 1500 or 2400 <= s < 2700 or 2800 <= s < 2900 and not 2833 <= s <= 2836 or 3000 <= s < 3100 or 3200 <= s < 3400:
         return "Materials", d
     if 1300 <= s < 1400 or 2900 <= s < 3000:

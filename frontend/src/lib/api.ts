@@ -23,6 +23,8 @@ import type {
   Theme,
   ThemeListRow,
   Thesis,
+  ThesisBook,
+  ThesisBookHistoryRow,
   ThesisHistoryRow,
   ThesisV2,
   ThesisV2List,
@@ -132,6 +134,10 @@ export const api = {
   etfBook: () => get<EtfBook>("/api/etf-book"),
   /** Per-run ETF-book summaries, newest first. */
   etfBookHistory: () => get<EtfBookHistoryRow[]>("/api/etf-book/history"),
+  /** Thesis-driven portfolio: a separate book that starts from the theses. 404s until the first pipeline run that builds it. */
+  thesisBook: () => get<ThesisBook>("/api/thesis-book"),
+  /** Per-run thesis-book summaries, newest first. */
+  thesisBookHistory: () => get<ThesisBookHistoryRow[]>("/api/thesis-book/history"),
   /** Point-in-time hindcast of the signals and rules. 404s until `python -m brain.hindcast` has run. */
   hindcast: () => get<Hindcast>("/api/hindcast"),
   runs: () => get<RunRow[]>("/api/runs"),

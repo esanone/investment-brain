@@ -20,7 +20,7 @@ export * from "@/lib/segment-config";
 const TREND_GLYPH: Record<string, string> = { accelerating: "▲", steady: "→", decelerating: "▼" };
 
 export default async function DashboardPage() {
-  const [ov, health, briefRes, attRes, thesisRes, oppRes, eventsRes, etfRes] = await Promise.all([
+  const [ov, health, briefRes, attRes, thesisRes, oppRes, eventsRes, etfRes, thesisBookRes] = await Promise.all([
     api.overview(),
     api.health(),
     api.brief(),
@@ -29,6 +29,7 @@ export default async function DashboardPage() {
     api.thesisV2Opportunities(),
     api.events(),
     api.etfBook(),
+    api.thesisBook(),
   ]);
   const running = health.ok ? health.data.running : false;
   // Morning brief card is optional: nothing renders until a brief has been generated.
@@ -59,6 +60,10 @@ export default async function DashboardPage() {
   // ETF book line is optional: nothing renders until the pipeline has built one.
   const etf = etfRes.ok ? etfRes.data : null;
   const etfTop = [...(etf?.holdings ?? [])].sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0)).slice(0, 5);
+
+  // Thesis-driven portfolio line is optional: nothing renders until the pipeline has built one.
+  const tb = thesisBookRes.ok ? thesisBookRes.data : null;
+  const tbTop = [...(tb?.holdings ?? [])].sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0)).slice(0, 5);
 
   if (!ov.ok) {
     return (
@@ -369,7 +374,7 @@ export default async function DashboardPage() {
         {/* PORTFOLIO */}
         {d.portfolio && (
           <Section
-            title="Portfolio"
+            title="Valuation-trend driven portfolio"
             subtitle={<Link href="/portfolio" className="hover:text-accent">Rules-based model portfolio · recalibrated every run</Link>}
             className="lg:col-span-5"
           >
@@ -453,6 +458,47 @@ export default async function DashboardPage() {
                 </div>
               </div>
               <Link href="/etf-book" className="text-[12px] text-accent hover:underline">Open the ETF book</Link>
+            </div>
+          </Section>
+        )}
+
+        {/* THESIS-DRIVEN PORTFOLIO */}
+        {tb && (
+          <Section
+            title="Thesis-driven portfolio"
+            subtitle={<Link href="/thesis-book" className="hover:text-accent">Starts from the theses; valuation only excludes names above their bull scenario · as of {tb.as_of}</Link>}
+            className="lg:col-span-5"
+          >
+            <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
+              <div>
+                <div className="eyebrow">Positions</div>
+                <div className="text-[20px] font-semibold leading-none">{tb.holdings?.length ?? 0}</div>
+              </div>
+              <div>
+                <div className="eyebrow">Equity weight</div>
+                <div className="text-[20px] font-semibold leading-none">{pct(tb.equity_weight, 1)}</div>
+              </div>
+              <div>
+                <div className="eyebrow">Wtd thesis score</div>
+                <div className="text-[20px] font-semibold leading-none">{num(tb.stats?.weighted_thesis_score, 0)}</div>
+              </div>
+              <div>
+                <div className="eyebrow">Wtd probability</div>
+                <div className="text-[20px] font-semibold leading-none">{pct(tb.stats?.weighted_probability, 0)}</div>
+              </div>
+              {/* min-w-56: on a phone the chips wrap onto their own line instead of being squeezed beside the stats. */}
+              <div className="min-w-56 flex-1">
+                <div className="eyebrow mb-1">Top holdings</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {tbTop.map((h) => (
+                    <Link key={h.ticker} href={companyHref(h.ticker)} className="chip hover:text-accent" title={h.name ?? undefined}>
+                      <span className="font-medium text-ink">{h.ticker}</span> {pct(h.weight, 1)}
+                    </Link>
+                  ))}
+                  {!tbTop.length && <span className="text-[12.5px] text-muted">No favoured name cleared the gates: the book is in cash.</span>}
+                </div>
+              </div>
+              <Link href="/thesis-book" className="text-[12px] text-accent hover:underline">Open the thesis-driven portfolio</Link>
             </div>
           </Section>
         )}

@@ -18,7 +18,7 @@ from .config import settings
 from .data import edgar, fred, prices as price_src
 from .db import init_db, session_scope
 from .engines import flows as flows_engine, fundamentals as fund_engine, regime as regime_engine
-from .engines import etf_book as etf_engine, portfolio as portfolio_engine, risk as risk_engine, strategist, themes as theme_engine
+from .engines import etf_book as etf_engine, portfolio as portfolio_engine, risk as risk_engine, strategist, themes as theme_engine, thesis_book as thesis_engine
 from .llm import enrich_thesis, portfolio_memo, provider as llm_provider
 from .models import AttentionObservation, Company, FilingEvent, Fundamental, InsiderTransaction, Instrument, MacroObservation, Price, Snapshot, Theme, ThemeExposure
 from .universe import COMPANIES, INSTRUMENTS, company_tickers
@@ -462,6 +462,33 @@ def run_thesis_v2_remap() -> int:
     return n
 
 
+def run_theme_map(force: bool = False, batch: int = 45, workers: int = 3) -> int:
+    """Map every universe name that themes.yaml does not cover to the theme graph (Sonnet, ~45 names per call)."""
+    from concurrent.futures import ThreadPoolExecutor
+    from .engines import theme_mapper as TM
+    init_db()
+    graph = theme_engine.load_graph(with_extra=False)
+    curated = {t for n in graph for t in theme_engine._all_exposures(n)}
+    themes = [{"id": n["id"], "name": n["name"], "description": n.get("description"), "sub_themes": [c["name"] for c in n.get("children") or []]} for n in graph]
+    existing = {} if force else TM.load_extra()
+    with session_scope() as s:
+        todo = [{"ticker": c.ticker, "name": c.name, "sector": c.sector, "industry": c.industry} for c in s.execute(select(Company)).scalars()
+                if c.ticker not in curated and c.ticker not in existing]
+    if not todo:
+        log("themes-map: nothing to map")
+        return 0
+    chunks = [todo[i:i + batch] for i in range(0, len(todo), batch)]
+    log(f"themes-map: mapping {len(todo)} names in {len(chunks)} calls ({len(curated)} curated, {len(existing)} already mapped)")
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        for i, res in enumerate(ex.map(lambda ch: TM.map_batch(ch, themes), chunks), 1):
+            existing.update(res)
+            log(f"themes-map: {i}/{len(chunks)} batches, {sum(1 for v in existing.values() if v)} names with a theme so far")
+    TM.save_extra(existing)
+    seed_reference(settings.universe_limit)
+    log(f"themes-map: done; {sum(1 for v in existing.values() if v)}/{len(existing)} mapped names carry at least one theme")
+    return len(todo)
+
+
 def run_thesis_v2_resolve(thesis_id: str, outcome: bool) -> dict:
     from .engines import causal
     rec = _thesis_v2_records().get(thesis_id)
@@ -575,7 +602,7 @@ def _latest_run_id(s) -> Optional[str]:
 
 
 # ------------------------------------------------------------------ compute
-def compute_all(frames: dict, as_of: date, use_llm: bool, llm_top_n: Optional[int] = None, force_enrich: bool = False, fresh: bool = False) -> dict:
+def compute_all(frames: dict, as_of: date, use_llm: bool, llm_top_n: Optional[int] = None, force_enrich: bool = False, fresh: bool = False, fresh_thesis: bool = False) -> dict:
     llm_top_n = llm_top_n or settings.llm_top_n
     companies, prices, macro = frames["companies"], frames["prices"], frames["macro"]
     log("engine: economic regime")
@@ -708,7 +735,16 @@ def compute_all(frames: dict, as_of: date, use_llm: bool, llm_top_n: Optional[in
                              settings.portfolio_value, as_of)
     log(f"engine: ETF book = {etf['stats']['positions'] if 'stats' in etf else len(etf['holdings'])} ETFs, cash {etf.get('cash_weight', 0):.0%}, "
         f"mode {etf['cadence']['mode']}: " + ", ".join(f"{h['symbol']} {h['weight']:.0%}" for h in etf["holdings"][:8]))
-    return {"etf_book": etf, "regime": regime, "flows": flows, "themes": themes, "analyses": analyses, "scores": scores,
+    thesis_bk = thesis_engine.compute(strategies, analyses, companies, technicals, pm_detail, flows, regime, risk, longterm, load_briefs(5),
+                                      list(_thesis_v2_records().values()), prices, None if (fresh or fresh_thesis) else load_prior("thesis_book"), settings.portfolio_value, as_of,
+                                      other_book=[h["ticker"] for h in portfolio["holdings"]])
+    if thesis_bk["cadence"]["mode"] == "recalibrate":
+        f = thesis_bk["funnel"]
+        log(f"engine: thesis book funnel: {f['favoured']} favoured -> above bull {f['above_bull']}, market gate {f['market_gate']}, sector gate {f['sector_gate']}, "
+            f"trend gate {f['trend_gate']}, earnings {f['earnings']}, caps {f['caps']} -> {f['selected']} selected")
+    log(f"engine: thesis book = {len(thesis_bk['holdings'])} positions, equity {thesis_bk['equity_weight']:.0%}, mode {thesis_bk['cadence']['mode']}: "
+        + ", ".join(f"{h['ticker']} {h['weight']:.1%}" for h in thesis_bk["holdings"][:12]))
+    return {"etf_book": etf, "thesis_book": thesis_bk, "regime": regime, "flows": flows, "themes": themes, "analyses": analyses, "scores": scores,
             "strategies": strategies, "ranked": ranked, "risk": risk, "portfolio": portfolio, "technicals": technicals, "pm_detail": pm_detail}
 
 
@@ -721,6 +757,7 @@ def persist(results: dict, frames: dict, as_of: date) -> str:
         s.add(Snapshot(run_id=run_id, kind="risk", key="", as_of=as_of, payload=results["risk"]))
         s.add(Snapshot(run_id=run_id, kind="portfolio", key="", as_of=as_of, payload=results["portfolio"]))
         s.add(Snapshot(run_id=run_id, kind="etf_book", key="", as_of=as_of, payload=results["etf_book"]))
+        s.add(Snapshot(run_id=run_id, kind="thesis_book", key="", as_of=as_of, payload=results["thesis_book"]))
         for th in results["themes"]:
             s.add(Snapshot(run_id=run_id, kind="theme", key=th["id"], as_of=as_of, payload=th))
         for t, st in results["strategies"].items():
@@ -741,7 +778,8 @@ def persist(results: dict, frames: dict, as_of: date) -> str:
 
 
 # ------------------------------------------------------------------ CLI
-def run(limit: Optional[int] = None, skip_ingest: bool = False, use_llm: bool = True, as_of: Optional[date] = None, force_enrich: bool = False, fresh: bool = False) -> str:
+def run(limit: Optional[int] = None, skip_ingest: bool = False, use_llm: bool = True, as_of: Optional[date] = None, force_enrich: bool = False, fresh: bool = False,
+        fresh_thesis: bool = False) -> str:
     t0 = time.time()
     init_db()
     limit = limit or settings.universe_limit
@@ -757,9 +795,14 @@ def run(limit: Optional[int] = None, skip_ingest: bool = False, use_llm: bool = 
         due = fundamentals_due(tickers, priority)
         log(f"edgar: {len(due)}/{len(tickers)} companies due for a filings refresh today")
         ingest_fundamentals(due)
+    if use_llm and llm_provider():
+        try:
+            run_theme_map()            # no-op unless names were added since the last mapping
+        except Exception as e:
+            log(f"themes-map: failed ({e}); continuing")
     frames = load_frames(tickers)
     as_of = as_of or date.today()
-    results = compute_all(frames, as_of, use_llm, force_enrich=force_enrich, fresh=fresh)
+    results = compute_all(frames, as_of, use_llm, force_enrich=force_enrich, fresh=fresh, fresh_thesis=fresh_thesis)
     run_id = persist(results, frames, as_of)
     log(f"done: run {run_id} in {time.time() - t0:.0f}s; top: " +
         ", ".join(f"{x['ticker']} {x['opportunity_score']} (gap {x['expectations_gap']:+.0f})" for x in results["ranked"][:8] if x["expectations_gap"] is not None))
@@ -768,7 +811,7 @@ def run(limit: Optional[int] = None, skip_ingest: bool = False, use_llm: bool = 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["run", "ingest", "brief", "morning", "attention", "longterm", "thesis-v2", "events"])
+    ap.add_argument("cmd", choices=["run", "ingest", "brief", "morning", "attention", "longterm", "thesis-v2", "events", "themes-map"])
     ap.add_argument("--new", type=str, default=None, help="thesis-v2: statement of a new thesis")
     ap.add_argument("--update", type=str, default=None, help="thesis-v2: id to review, or 'all'")
     ap.add_argument("--resolve", type=str, default=None, help="thesis-v2: 'T-001:true|false'")
@@ -783,9 +826,13 @@ def main() -> None:
     ap.add_argument("--as-of", type=str, default=None)
     ap.add_argument("--enrich", action="store_true", help="run: force LLM enrichment even on a monitor day")
     ap.add_argument("--fresh", action="store_true", help="run: rebuild the portfolio from scratch (ignore the prior book; entry prices reset to today)")
+    ap.add_argument("--fresh-thesis", action="store_true", help="run: rebuild only the thesis-driven portfolio from scratch")
     a = ap.parse_args()
     if a.cmd == "attention":
         run_attention()
+        return
+    if a.cmd == "themes-map":
+        run_theme_map(force=a.fresh)
         return
     if a.cmd == "events":
         run_events()
@@ -846,7 +893,7 @@ def main() -> None:
         ingest_prices(list(INSTRUMENTS) + tickers)
         ingest_fundamentals(tickers)
     else:
-        run(a.limit, a.skip_ingest, not a.no_llm, date.fromisoformat(a.as_of) if a.as_of else None, force_enrich=a.enrich, fresh=a.fresh)
+        run(a.limit, a.skip_ingest, not a.no_llm, date.fromisoformat(a.as_of) if a.as_of else None, force_enrich=a.enrich, fresh=a.fresh, fresh_thesis=a.fresh_thesis)
 
 
 if __name__ == "__main__":

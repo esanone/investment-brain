@@ -19,9 +19,20 @@ from .fundamentals import ORDER_DECAY
 STAR_GAP = 12.0
 
 
-def load_graph(path: Optional[Path] = None) -> list[dict]:
+def load_graph(path: Optional[Path] = None, with_extra: bool = True) -> list[dict]:
     p = path or Path(__file__).resolve().parent.parent / "themes.yaml"
-    return yaml.safe_load(p.read_text())["themes"]
+    graph = yaml.safe_load(p.read_text())["themes"]
+    extra_path = p.parent / "theme_exposures_extra.yaml"
+    if with_extra and path is None and extra_path.exists():
+        # Wide-universe mappings (engines/theme_mapper.py) attach to the top-level node; curated exposures win.
+        extra = (yaml.safe_load(extra_path.read_text()) or {}).get("exposures", {}) or {}
+        nodes = {n["id"]: n for n in graph}
+        curated = {n["id"]: set(_all_exposures(n)) for n in graph}
+        for ticker, exps in extra.items():
+            for theme_id, wo in (exps or {}).items():
+                if theme_id in nodes and ticker not in curated[theme_id]:
+                    nodes[theme_id].setdefault("exposures", {})[ticker] = [float(wo[0]), int(wo[1])]
+    return graph
 
 
 def flatten(graph: list[dict]) -> tuple[list[dict], list[dict]]:

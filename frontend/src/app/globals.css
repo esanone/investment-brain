@@ -182,15 +182,18 @@ button {
   font-size: 12.5px;
 }
 
-.chip {
-  display: inline-block;
-  border: 1px solid var(--border);
-  background: var(--surface-2);
-  color: var(--text-muted);
-  border-radius: 999px;
-  padding: 1px 8px;
-  font-size: 11.5px;
-  line-height: 1.5;
+/* In the components layer so Tailwind colour utilities (border-pos, bg-pos-soft, text-neg ...) can override the neutral default. */
+@layer components {
+  .chip {
+    display: inline-block;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-muted);
+    border-radius: 999px;
+    padding: 1px 8px;
+    font-size: 11.5px;
+    line-height: 1.5;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

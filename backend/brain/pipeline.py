@@ -18,7 +18,7 @@ from .config import settings
 from .data import edgar, fred, prices as price_src
 from .db import init_db, session_scope
 from .engines import flows as flows_engine, fundamentals as fund_engine, regime as regime_engine
-from .engines import etf_book as etf_engine, portfolio as portfolio_engine, risk as risk_engine, strategist, themes as theme_engine, thesis_book as thesis_engine
+from .engines import etf_book as etf_engine, income_book as income_engine, portfolio as portfolio_engine, risk as risk_engine, strategist, themes as theme_engine, thesis_book as thesis_engine
 from .llm import enrich_thesis, portfolio_memo, provider as llm_provider
 from .models import AttentionObservation, Company, FilingEvent, Fundamental, InsiderTransaction, Instrument, MacroObservation, Price, Snapshot, Theme, ThemeExposure
 from .universe import COMPANIES, INSTRUMENTS, company_tickers
@@ -602,6 +602,27 @@ def _latest_run_id(s) -> Optional[str]:
 
 
 # ------------------------------------------------------------------ compute
+def load_yields(instruments: list[dict], prices: dict, as_of: date) -> dict[str, dict]:
+    """Distribution summaries for the income universe (income group + bond ETFs + rate-sensitive sectors); cached a day per symbol."""
+    from concurrent.futures import ThreadPoolExecutor
+    from .data import dividends as DV
+    syms = [i["symbol"] for i in instruments if i["group"] in ("income", "bond")] + ["XLU", "XLRE", "XLE", "SPY"]
+
+    def one(sym):
+        df = prices.get(sym)
+        price = float(df.sort_values("date")["close"].iloc[-1]) if df is not None and len(df) else None
+        try:
+            return sym, DV.summarize(sym, price, as_of)
+        except Exception as e:
+            log(f"dividends: {sym}: {e}")
+            return sym, None
+
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        out = {sym: d for sym, d in ex.map(one, syms) if d}
+    log(f"dividends: distribution data for {len(out)}/{len(syms)} income instruments")
+    return out
+
+
 def compute_all(frames: dict, as_of: date, use_llm: bool, llm_top_n: Optional[int] = None, force_enrich: bool = False, fresh: bool = False, fresh_thesis: bool = False) -> dict:
     llm_top_n = llm_top_n or settings.llm_top_n
     companies, prices, macro = frames["companies"], frames["prices"], frames["macro"]
@@ -744,7 +765,11 @@ def compute_all(frames: dict, as_of: date, use_llm: bool, llm_top_n: Optional[in
             f"trend gate {f['trend_gate']}, earnings {f['earnings']}, caps {f['caps']} -> {f['selected']} selected")
     log(f"engine: thesis book = {len(thesis_bk['holdings'])} positions, equity {thesis_bk['equity_weight']:.0%}, mode {thesis_bk['cadence']['mode']}: "
         + ", ".join(f"{h['ticker']} {h['weight']:.1%}" for h in thesis_bk["holdings"][:12]))
-    return {"etf_book": etf, "thesis_book": thesis_bk, "regime": regime, "flows": flows, "themes": themes, "analyses": analyses, "scores": scores,
+    income = income_engine.compute(prices, frames["instruments"], load_yields(frames["instruments"], prices, as_of), regime, flows, risk, macro,
+                                   None if fresh else load_prior("income_book"), settings.portfolio_value, as_of)
+    log(f"engine: income book = {len(income['holdings'])} ETFs, blended yield {income['income']['blended_yield_pct']}% (${income['income']['monthly_avg']}/month), "
+        f"mode {income['cadence']['mode']}, triggers active: {[t['id'] for t in income['triggers'] if t['active']]}")
+    return {"etf_book": etf, "thesis_book": thesis_bk, "income_book": income, "regime": regime, "flows": flows, "themes": themes, "analyses": analyses, "scores": scores,
             "strategies": strategies, "ranked": ranked, "risk": risk, "portfolio": portfolio, "technicals": technicals, "pm_detail": pm_detail}
 
 
@@ -758,6 +783,7 @@ def persist(results: dict, frames: dict, as_of: date) -> str:
         s.add(Snapshot(run_id=run_id, kind="portfolio", key="", as_of=as_of, payload=results["portfolio"]))
         s.add(Snapshot(run_id=run_id, kind="etf_book", key="", as_of=as_of, payload=results["etf_book"]))
         s.add(Snapshot(run_id=run_id, kind="thesis_book", key="", as_of=as_of, payload=results["thesis_book"]))
+        s.add(Snapshot(run_id=run_id, kind="income_book", key="", as_of=as_of, payload=results["income_book"]))
         for th in results["themes"]:
             s.add(Snapshot(run_id=run_id, kind="theme", key=th["id"], as_of=as_of, payload=th))
         for t, st in results["strategies"].items():

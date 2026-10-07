@@ -18,6 +18,7 @@ const NAV = [
   { href: "/portfolio", label: "Valuation-Trend Portfolio" },
   { href: "/thesis-book", label: "Thesis-Driven Portfolio" },
   { href: "/etf-book", label: "ETF Book" },
+  { href: "/income-book", label: "Income Portfolio" },
   { href: "/risk", label: "Risk" },
   { href: "/hindcast", label: "Hindcast" },
 ];

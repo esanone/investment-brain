@@ -428,6 +428,20 @@ def thesis_book_history() -> list[dict]:
                  "trades": [{"action": t["action"], "ticker": t["ticker"], "to": t["to"]} for t in x.payload.get("trades", [])]} for x in rows]
 
 
+@app.get("/api/income-book")
+def income_book(run_id: Optional[str] = None) -> dict:
+    return _one("income_book", "", run_id)
+
+
+@app.get("/api/income-book/history")
+def income_book_history() -> list[dict]:
+    with session_scope() as s:
+        rows = s.execute(select(Snapshot).where(Snapshot.kind == "income_book").order_by(desc(Snapshot.id)).limit(60)).scalars()
+        return [{"run_id": x.run_id, "as_of": x.payload.get("as_of"), "mode": x.payload.get("cadence", {}).get("mode"), "positions": len(x.payload.get("holdings", [])),
+                 "blended_yield_pct": (x.payload.get("income") or {}).get("blended_yield_pct"), "monthly_avg": (x.payload.get("income") or {}).get("monthly_avg"),
+                 "nav_index": x.payload.get("nav_index"), "trades": [{"action": t["action"], "symbol": t["symbol"], "to": t["to"]} for t in x.payload.get("trades", [])]} for x in rows]
+
+
 @app.get("/api/etf-book")
 def etf_book(run_id: Optional[str] = None) -> dict:
     return _one("etf_book", "", run_id)

@@ -1885,6 +1885,168 @@ export interface EtfBookHistoryRow {
   holdings: string[];
 }
 
+// ---------------------------------------------------------------- income book
+export type IncomeFrequency = "monthly" | "quarterly" | "semi-annual" | "annual" | "irregular";
+
+/** 10-month trend read for one income ETF (income_book.py). `dist_pct` and `ret_12m` are percent points. */
+export interface IncomeTrend {
+  last: Num;
+  sma: Num;
+  dist_pct: Num;
+  above: boolean;
+  ret_12m: Num;
+}
+
+/** Distribution profile shared by holdings and candidates. Yields and payout trend are percent points. */
+export interface IncomeProfile {
+  symbol: string;
+  name: string;
+  yield_ttm_pct: Num;
+  yield_forward_pct: Num;
+  frequency: IncomeFrequency;
+  /** Trailing-12m distributions vs the prior 12m, percent points. */
+  payout_trend_pct: Num;
+  trend: IncomeTrend | null;
+  /** Sector-flow score when the ETF maps to a sector, else null. */
+  flow: Num;
+}
+
+export interface IncomeHolding extends IncomeProfile {
+  sleeve: string;
+  /** Fraction of the book. */
+  weight: number;
+  dollars: Num;
+  shares: Num;
+  price: Num;
+  entry_price: Num;
+  entered: string | null;
+  /** Percent points since entry. */
+  pnl_pct: Num;
+  status: "new" | "held";
+  prior_weight: Num;
+  notes: string[];
+  /** Last distribution per share, in dollars. */
+  last_amount: Num;
+  last_ex_date: string | null;
+  next_pay_est: string | null;
+  /** Calendar months (1-12) in which the ETF pays. */
+  pay_months: number[];
+  /** Dollars per year / per month at the current weight. */
+  annual_income: Num;
+  monthly_income: Num;
+}
+
+export interface IncomeCandidate extends IncomeProfile {
+  held: boolean;
+}
+
+export interface IncomeTrade {
+  action: TradeAction;
+  symbol: string;
+  name: string;
+  from: Num;
+  to: Num;
+  dollars: Num;
+  reason: string;
+}
+
+export interface IncomeAlert {
+  symbol: string;
+  name: string;
+  weight: Num;
+  alert: string;
+}
+
+/** One conditional add/cut rule and whether its condition currently holds. */
+export interface IncomeTrigger {
+  id: string;
+  label: string;
+  active: boolean;
+  detail: string;
+  action: string;
+}
+
+/** Equity-income ETF below its 10-month average whose target weight is sitting in T-bills. */
+export interface IncomeParked {
+  symbol: string;
+  name: string;
+  weight: Num;
+  dist_pct: Num;
+}
+
+/** Macro rates read, all percent points. */
+export interface IncomeRates {
+  dgs10: Num;
+  dgs10_200d: Num;
+  dgs10_below_200d: boolean | null;
+  dgs2: Num;
+  fedfunds: Num;
+  hy_spread: Num;
+  vix: Num;
+  real_10y: Num;
+  curve_10y2y: Num;
+}
+
+/** Projected cash distributions. Dollars, except the `*_pct` shares and the blended yield (percent points). */
+export interface IncomeSummary {
+  annual: Num;
+  monthly_avg: Num;
+  blended_yield_pct: Num;
+  by_month: { month: string; income: Num }[];
+  monthly_share_pct: Num;
+  equity_income_share_pct: Num;
+}
+
+export interface IncomeBookStats {
+  positions: number;
+  weighted_yield_pct: Num;
+  turnover: Num;
+}
+
+/** /api/income-book: the distribution-focused ETF book (income_book.py `compute`). Weights are fractions, `*_pct` are percent points. */
+export interface IncomeBook {
+  as_of: string;
+  portfolio_value: number;
+  is_initial: boolean;
+  prior_as_of: string | null;
+  last_recalibration: string | null;
+  cadence: { mode: CadenceMode; last_recalibration: string | null; next_recalibration: string | null };
+  regime: string | null;
+  risk_label: string | null;
+  regime_gate: { open: boolean; note: string } | null;
+  rates: IncomeRates | null;
+  holdings: IncomeHolding[];
+  trades: IncomeTrade[];
+  alerts: IncomeAlert[];
+  triggers: IncomeTrigger[];
+  /** Sleeve name -> fraction of the book. */
+  sleeves: Record<string, number>;
+  reinvest: { recommendation: "reinvest" | "hold as cash"; why: string } | null;
+  income: IncomeSummary;
+  parked: IncomeParked[];
+  /** Full income universe, sorted by yield. */
+  candidates: IncomeCandidate[];
+  stats: IncomeBookStats;
+  nav_index: Num;
+  nav_peak: Num;
+  drawdown_pct: Num;
+  period_return_pct: Num;
+  /** RULES dict: `targets` maps symbol -> [weight, sleeve]; the rest is free-form. */
+  rules: Record<string, unknown> & { targets?: Record<string, [number, string]>; reserve?: number; hard_stop_pct?: number };
+}
+
+/** Row as returned by /api/income-book/history (newest first). */
+export interface IncomeBookHistoryRow {
+  run_id: string;
+  as_of: string;
+  mode: CadenceMode | null;
+  positions: number;
+  blended_yield_pct: Num;
+  monthly_avg: Num;
+  nav_index: Num;
+  trades: { action: TradeAction; symbol: string; to: Num }[];
+}
+
 // ---------------------------------------------------------------- thesis-driven portfolio
 /** Thesis score split by source, each 0-100 (thesis_book.py `score_universe`). */
 export interface ThesisBookComponents {

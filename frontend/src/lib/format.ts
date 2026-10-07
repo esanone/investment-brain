@@ -81,6 +81,13 @@ export function money(v: Num | undefined, digits = 1): string {
   return `${sign}$${a.toFixed(digits)}`;
 }
 
+/** Whole US dollars with thousands separators: 4892 -> "$4,892" (income figures are small enough that compact units would blur them). */
+export function usd(v: Num | undefined, digits = 0): string {
+  if (bad(v)) return DASH;
+  const sign = v < 0 ? "-" : "";
+  return `${sign}$${Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
+}
+
 /** Share price: 187.43 -> "$187.43" */
 export function price(v: Num | undefined): string {
   if (bad(v)) return DASH;

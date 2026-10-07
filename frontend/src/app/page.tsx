@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { DIM_KEYS, REGIME_NAMES, isCompanyAttention } from "@/lib/types";
-import { DIM_LABELS, num, pct, signed, signClass, companyHref } from "@/lib/format";
+import { DIM_LABELS, num, pct, pts, signed, signClass, companyHref, usd } from "@/lib/format";
 import { CompanyRowsTable } from "@/components/CompanyRowsTable";
 import { DirectionChip } from "@/components/DirectionChip";
 import { DivergingBar } from "@/components/DivergingBar";
@@ -20,7 +20,7 @@ export * from "@/lib/segment-config";
 const TREND_GLYPH: Record<string, string> = { accelerating: "▲", steady: "→", decelerating: "▼" };
 
 export default async function DashboardPage() {
-  const [ov, health, briefRes, attRes, thesisRes, oppRes, eventsRes, etfRes, thesisBookRes] = await Promise.all([
+  const [ov, health, briefRes, attRes, thesisRes, oppRes, eventsRes, etfRes, thesisBookRes, incomeRes] = await Promise.all([
     api.overview(),
     api.health(),
     api.brief(),
@@ -30,6 +30,7 @@ export default async function DashboardPage() {
     api.events(),
     api.etfBook(),
     api.thesisBook(),
+    api.incomeBook(),
   ]);
   const running = health.ok ? health.data.running : false;
   // Morning brief card is optional: nothing renders until a brief has been generated.
@@ -64,6 +65,10 @@ export default async function DashboardPage() {
   // Thesis-driven portfolio line is optional: nothing renders until the pipeline has built one.
   const tb = thesisBookRes.ok ? thesisBookRes.data : null;
   const tbTop = [...(tb?.holdings ?? [])].sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0)).slice(0, 5);
+
+  // Income portfolio line is optional: nothing renders until the pipeline has built one.
+  const income = incomeRes.ok ? incomeRes.data : null;
+  const incomeTop = [...(income?.holdings ?? [])].sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0)).slice(0, 4);
 
   if (!ov.ok) {
     return (
@@ -499,6 +504,43 @@ export default async function DashboardPage() {
                 </div>
               </div>
               <Link href="/thesis-book" className="text-[12px] text-accent hover:underline">Open the thesis-driven portfolio</Link>
+            </div>
+          </Section>
+        )}
+
+        {/* INCOME PORTFOLIO */}
+        {income && (
+          <Section
+            title="Income portfolio"
+            subtitle={<Link href="/income-book" className="hover:text-accent">ETF book built for cash distributions · as of {income.as_of}</Link>}
+            className="lg:col-span-5"
+          >
+            <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
+              <div>
+                <div className="eyebrow">Monthly income</div>
+                <div className="text-[20px] font-semibold leading-none">{usd(income.income?.monthly_avg)}</div>
+              </div>
+              <div>
+                <div className="eyebrow">Blended yield</div>
+                <div className="text-[20px] font-semibold leading-none">{pts(income.income?.blended_yield_pct, 2)}</div>
+              </div>
+              <div>
+                <div className="eyebrow">Paid monthly</div>
+                <div className="text-[20px] font-semibold leading-none">{pts(income.income?.monthly_share_pct, 0)}</div>
+              </div>
+              {/* min-w-56: on a phone the chips wrap onto their own line instead of being squeezed beside the stats. */}
+              <div className="min-w-56 flex-1">
+                <div className="eyebrow mb-1">Top holdings</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {incomeTop.map((h) => (
+                    <span key={h.symbol} className="chip" title={`${h.name} · ${pts(h.yield_ttm_pct, 2)} yield`}>
+                      <span className="font-medium text-ink">{h.symbol}</span> {pct(h.weight, 1)}
+                    </span>
+                  ))}
+                  {!incomeTop.length && <span className="text-[12.5px] text-muted">No holdings: the book is in cash.</span>}
+                </div>
+              </div>
+              <Link href="/income-book" className="text-[12px] text-accent hover:underline">Open the income portfolio</Link>
             </div>
           </Section>
         )}

@@ -10,6 +10,8 @@ import type {
   Flows,
   Health,
   Hindcast,
+  IncomeBook,
+  IncomeBookHistoryRow,
   Overview,
   Portfolio,
   PortfolioHistoryRow,
@@ -134,6 +136,10 @@ export const api = {
   etfBook: () => get<EtfBook>("/api/etf-book"),
   /** Per-run ETF-book summaries, newest first. */
   etfBookHistory: () => get<EtfBookHistoryRow[]>("/api/etf-book/history"),
+  /** Income-focused ETF book (cash distributions). 404s until the first pipeline run that builds it. */
+  incomeBook: () => get<IncomeBook>("/api/income-book"),
+  /** Per-run income-book summaries, newest first. */
+  incomeBookHistory: () => get<IncomeBookHistoryRow[]>("/api/income-book/history"),
   /** Thesis-driven portfolio: a separate book that starts from the theses. 404s until the first pipeline run that builds it. */
   thesisBook: () => get<ThesisBook>("/api/thesis-book"),
   /** Per-run thesis-book summaries, newest first. */

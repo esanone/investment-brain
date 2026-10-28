@@ -136,6 +136,87 @@ def _regime_worker(T: pd.Timestamp) -> Optional[float]:
         return None
 
 
+def _atr(px: pd.DataFrame, n: int = 20) -> pd.Series:
+    hi, lo, cl = px["high"].astype(float), px["low"].astype(float), px["close"].astype(float)
+    tr = pd.concat([hi - lo, (hi - cl.shift()).abs(), (lo - cl.shift()).abs()], axis=1).max(axis=1)
+    return tr.rolling(n).mean()
+
+
+def _strategy_daily(frames: dict[pd.Timestamp, pd.DataFrame], data: dict, step_m: int, replace: bool, n_hold: int = 20, queue_depth: int = 20,
+                    cap_pct: float = 12.0, atr_mult: float = 3.0) -> dict:
+    """Same selection as _strategy (all gates on) but positions are checked DAILY against a stop: the wider of a 12% hard cap and a
+    Chandelier trail (highest close - 3 x ATR20, ratcheted). A stopped slot goes to cash until the next anchor (replace=False) or is
+    refilled the next day from the anchor's queue: the next-ranked names that passed every gate (replace=True), each used once,
+    with a 30-day cool-down on stopped names."""
+    spy = data["prices"]["SPY"]
+    anchors = sorted(frames)
+    rets, bench, turn, held_prev = [], [], [], set()
+    n_stops = n_repl = 0
+    atr_cache: dict[str, pd.Series] = {}
+    for T, T2 in zip(anchors[:-1], anchors[1:]):
+        df = frames[T]
+        c = df[(df.reality >= 55) & (df.expectations_gap >= 0) & df.trend_ready & ~df.er_band.isin(["reduce", "exit_candidate"])]
+        c = c.sort_values("expectations_gap", ascending=False)
+        chosen, queue = list(c.ticker.iloc[:n_hold]), list(c.ticker.iloc[n_hold:n_hold + queue_depth])
+        spy_t = spy[spy.date <= T]
+        gate = bool(spy_t.close.iloc[-1] > spy_t.close.iloc[-210:].mean() and spy_t.close.iloc[-1] > spy_t.close.iloc[-252]) if len(spy_t) > 260 else True
+        w = min(0.05, 1 / max(len(chosen), 1)) if chosen else 0
+        expo = 1.0 if gate else 0.5
+        days = spy[(spy.date > T) & (spy.date <= T2)].date.tolist()
+        slot_ret = []
+        cooldown: dict[str, pd.Timestamp] = {}
+        for t0 in chosen:
+            t, ret_slot, cash_from = t0, 1.0, None
+            while t is not None:
+                px = data["prices"].get(t)
+                if px is None:
+                    break
+                if t not in atr_cache:
+                    atr_cache[t] = _atr(px).set_axis(px.date)
+                seg = px[(px.date >= (cash_from or T)) & (px.date <= T2)]
+                if cash_from is not None:
+                    seg = px[(px.date > cash_from) & (px.date <= T2)]
+                if len(seg) < 2:
+                    break
+                entry = float(seg.close.iloc[0]) if cash_from is not None else float(px[px.date <= T].close.iloc[-1])
+                hi_close, stop, exit_px, exit_day = entry, None, None, None
+                for _, row in seg.iterrows():
+                    cl = float(row.close)
+                    hi_close = max(hi_close, cl)
+                    a = atr_cache[t].get(row.date)
+                    trail = hi_close - atr_mult * float(a) if a is not None and not np.isnan(a) else None
+                    lvl = max(entry * (1 - cap_pct / 100), trail) if trail is not None else entry * (1 - cap_pct / 100)
+                    stop = lvl if stop is None else max(stop, lvl)
+                    if cl <= stop:
+                        exit_px, exit_day = cl, row.date
+                        break
+                if exit_day is None:
+                    ret_slot *= float(seg.close.iloc[-1]) / entry
+                    t = None
+                else:
+                    ret_slot *= exit_px / entry
+                    n_stops += 1
+                    cooldown[t] = exit_day + pd.Timedelta(days=30)
+                    t = None
+                    if replace:
+                        while queue:
+                            cand = queue.pop(0)
+                            if cooldown.get(cand, pd.Timestamp.min) > exit_day:
+                                continue
+                            t, cash_from = cand, exit_day
+                            n_repl += 1
+                            break
+            slot_ret.append(ret_slot - 1)
+        port = (np.mean(slot_ret) if slot_ret else 0.0) * (len(chosen) * w) * expo
+        s0 = spy[spy.date <= T].close.iloc[-1]; s1 = spy[spy.date <= T2].close.iloc[-1]
+        rets.append(port); bench.append(float(s1 / s0 - 1))
+        now = set(chosen); turn.append(len(now ^ held_prev) / max(len(now | held_prev), 1)); held_prev = now
+    ppy = 12 / step_m
+    out = _perf(rets, ppy); out["turnover"] = round(float(np.mean(turn)) * ppy, 2) if turn else None
+    out["stops"], out["replacements"] = n_stops, n_repl
+    return {"perf": out, "bench": _perf(bench, ppy), "hit_rate": float(np.mean([a > b for a, b in zip(rets, bench)])) if rets else None}
+
+
 def _spearman(a: pd.Series, b: pd.Series) -> Optional[float]:
     j = pd.concat([a, b], axis=1).dropna()
     if len(j) < 25:
@@ -268,6 +349,26 @@ def run(start: str = "2017-01-01", step_m: int = 3, limit: Optional[int] = None,
         dd = (base["perf"]["max_drawdown"] or 0) - (alt["perf"]["max_drawdown"] or 0)
         rules.append({"name": name, "label": label, "with_rule": base["perf"], "without_rule": alt["perf"],
                       "delta_note": f"With the rule: CAGR {d * 100:+.1f} pts, max drawdown {dd * 100:+.1f} pts (positive = shallower)"})
+    # daily stop management: cash-until-anchor vs replace-from-queue
+    try:
+        d_cash = _strategy_daily(frames, data, step_m, replace=False)
+        d_repl = _strategy_daily(frames, data, step_m, replace=True)
+        w_cash = _strategy_daily(frames, data, step_m, replace=False, cap_pct=20.0, atr_mult=5.0)
+        w_repl = _strategy_daily(frames, data, step_m, replace=True, cap_pct=20.0, atr_mult=5.0)
+        for name, label, a, b in (("daily_stops", "Daily stop exits (12% cap or 3xATR trail) instead of holding to the next rebalance", d_cash, base),
+                                  ("replace_on_exit", "Refill a stopped slot from the queue instead of holding cash (12% / 3xATR stops)", d_repl, d_cash),
+                                  ("daily_stops_wide", "Daily stop exits with wide stops (20% cap or 5xATR trail)", w_cash, base),
+                                  ("replace_on_exit_wide", "Refill from the queue with wide stops", w_repl, w_cash)):
+            d = (a["perf"]["cagr"] or 0) - (b["perf"]["cagr"] or 0)
+            dd = (a["perf"]["max_drawdown"] or 0) - (b["perf"]["max_drawdown"] or 0)
+            rules.append({"name": name, "label": label, "with_rule": a["perf"], "without_rule": b["perf"],
+                          "delta_note": f"With the rule: CAGR {d * 100:+.1f} pts, max drawdown {dd * 100:+.1f} pts (positive = shallower)"
+                                        + (f"; {a['perf'].get('stops')} stops, {a['perf'].get('replacements')} replacements" if a["perf"].get("stops") is not None else "")})
+        log(f"hindcast: daily stops cash CAGR {d_cash['perf']['cagr']} dd {d_cash['perf']['max_drawdown']} ({d_cash['perf']['stops']} stops); "
+            f"replace CAGR {d_repl['perf']['cagr']} dd {d_repl['perf']['max_drawdown']} ({d_repl['perf']['replacements']} replacements); base CAGR {base['perf']['cagr']}; "
+            f"wide: cash {w_cash['perf']['cagr']} dd {w_cash['perf']['max_drawdown']} ({w_cash['perf']['stops']} stops), replace {w_repl['perf']['cagr']} dd {w_repl['perf']['max_drawdown']}")
+    except Exception as e:
+        log(f"hindcast: daily-stop variants failed ({e})")
     out = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "config": {"start": anchors[0].date().isoformat(), "end": anchors[-1].date().isoformat(), "step_months": step_m, "horizons_months": [3, 6, 12],

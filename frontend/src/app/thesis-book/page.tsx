@@ -6,6 +6,7 @@ import { companyHref, date, money, num, pct, price, pts, ptsSigned, signClass } 
 import { CommandEmptyState } from "@/components/CommandEmptyState";
 import { DirectionChip } from "@/components/DirectionChip";
 import { EmptyState } from "@/components/EmptyState";
+import { NextInLine } from "@/components/NextInLine";
 import { PageHeader } from "@/components/PageHeader";
 import { Section } from "@/components/Section";
 import { ThesisCandidatesTable, ThesisHoldingsTable } from "@/components/ThesisBookTables";
@@ -312,6 +313,16 @@ export default async function ThesisBookPage() {
         >
           <ThesisHoldingsTable rows={holdings} />
         </Section>
+
+        <NextInLine
+          book="thesis"
+          queue={b.queue}
+          rules={rules}
+          cooldowns={b.cooldowns}
+          replacementNote={b.replacement_note}
+          replacementsThisMonth={b.replacements_this_month}
+          className="lg:col-span-2"
+        />
 
         {trades.length > 0 && (
           <Section

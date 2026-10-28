@@ -912,7 +912,45 @@ export interface Portfolio {
   // ---- portfolio-management layer (pm.py); absent on older snapshots ----
   /** Hedge engine read (vol targeting, betas, clusters, staircase, recommendations); null/absent when prices were unavailable. */
   hedge?: Hedge | null;
+  // ---- replacement queue (portfolio engine v4); absent on older snapshots ----
+  /** Names passing every entry gate, eligible first then by score (up to `rules.queue_size`). */
+  queue?: PortfolioQueueRow[];
+  cooldowns?: Cooldowns | null;
+  replacement_note?: string | null;
+  replacements_this_month?: number | null;
 }
+
+/** Trend-template read on a queue row (subset of `HoldingTechnical`). */
+export interface QueueTrend {
+  passes: Num;
+  score: Num;
+  stage: TrendStage | string | null;
+}
+
+/** Fields shared by the replacement-queue rows of both books. `runs` = consecutive runs the name has passed every gate. */
+export interface QueueRowBase {
+  ticker: string;
+  name: string | null;
+  sector: string | null;
+  runs: number;
+  /** True once `runs` reaches `rules.queue_runs`: the name can refill a lone mid-month exit. */
+  eligible: boolean;
+  top_theme: string | null;
+}
+
+/** Replacement-queue row of the valuation-trend book. Scores 0-100, `expected_return_pct` in percent points. */
+export interface PortfolioQueueRow extends QueueRowBase {
+  conviction: Num;
+  opportunity: Num;
+  gap: Num;
+  price: Num;
+  entry_score: Num;
+  expected_return_pct: Num;
+  trend: QueueTrend | null;
+}
+
+/** Tickers barred from the queue after a stop-out, with the date the cool-down ends ("YYYY-MM-DD"). */
+export type Cooldowns = Record<string, string>;
 
 /** RULES values: numbers, the mode string, booleans, the drawdown ladder `[[dd%, risk mult, cap mult], ...]`, or a small lookup (e.g. pm `momentum_grades`). */
 export type RuleValue = number | string | boolean | number[][] | Record<string, number>;
@@ -2257,6 +2295,21 @@ export interface ThesisBook {
   theses: ThesisBookThesis[];
   shifts: ThesisBookShift[];
   stats: ThesisBookStats | null;
+  // ---- replacement queue; absent on older snapshots ----
+  /** Names passing every entry gate, eligible first then by thesis score (up to `rules.queue_size`). */
+  queue?: ThesisBookQueueRow[];
+  cooldowns?: Cooldowns | null;
+  replacement_note?: string | null;
+  replacements_this_month?: number | null;
+}
+
+/** Replacement-queue row of the thesis-driven book. `thesis_probability` is a fraction. */
+export interface ThesisBookQueueRow extends QueueRowBase {
+  thesis_score: Num;
+  thesis_probability: Num;
+  theses: string[] | null;
+  valuation: ThesisBookValuation | null;
+  technical: ThesisBookTechnical | null;
 }
 
 /** Row as returned by /api/thesis-book/history (newest first). */

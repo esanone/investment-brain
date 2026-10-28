@@ -71,3 +71,22 @@ def test_monitor_mode_holds_and_exit_on_thesis_decay_next_month():
     nxt = _run(prior=first, as_of=date(2026, 11, 2), records=rec, longterm=lt, briefs=[])
     assert nxt["cadence"]["mode"] == "recalibrate" and nxt["holdings"] == []
     assert "no longer favour" in nxt["exits"][0]["reason"]
+
+
+def test_monitor_queue_and_replacement():
+    first = _run()
+    # day 2 and 3 in monitor mode build the queue; CCC (trend) and DDD (sector) still fail, nothing is queued
+    m1 = _run(prior=first, as_of=date(2026, 10, 6))
+    assert m1["queue"] == [] and m1["funnel"]["favoured"] >= 3
+    # make BBB pass (price below bull) for three runs, then stop AAA out: BBB replaces it
+    s, a, c, t, pmd, fl, rg, rk, lt, br, rec = _world()
+    pmd["BBB"] = {"expected_return": {"bear": 60.0, "base": 120.0, "bull": 160.0, "expected_return_pct": 0.0, "confidence": "normal"}}
+    prior = first
+    for d in (7, 8, 9):
+        prior = _run(prior=prior, as_of=date(2026, 10, d), pm_detail=pmd)
+    assert [(q["ticker"], q["runs"], q["eligible"]) for q in prior["queue"]] == [("BBB", 3, True)]
+    a["AAA"]["price"] = 86.0                                           # below the 12% hard cap
+    out = _run(prior=prior, as_of=date(2026, 10, 12), pm_detail=pmd, analyses=a)
+    assert [e["ticker"] for e in out["exits"]] == ["AAA"]
+    assert [h["ticker"] for h in out["holdings"]] == ["BBB"] and out["holdings"][0]["status"] == "new"
+    assert out["cooldowns"]["AAA"] == "2026-11-11" and out["replacements_this_month"] == 1

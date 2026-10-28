@@ -53,6 +53,11 @@ RULES = {
     # up to x1.35 for the top-ranked name; names with net headwind exposure x0.8
     "hfe_min_mult": 0.85, "hfe_max_mult": 1.35, "hfe_headwind_mult": 0.8,
     "insider_cluster_mult": 1.10, "insider_notable_mult": 1.05, "high_severity_8k_mult": 0.7, "officer_change_mult": 0.9,
+    # Replacement queue: names passing every entry gate on `queue_runs` consecutive runs are "next in line". When a position
+    # exits mid-month on its own (one exit, regime gate open, Contraction below 40%, no other exit in the last 5 runs) the
+    # freed weight is refilled from the queue the same morning; a systemic exit leaves the cash for the recalibration.
+    "queue_runs": 3, "queue_size": 12, "replace_on_exit": True, "replacements_per_month": 3, "stopout_cooldown_days": 30,
+    "systemic_exits_window_runs": 5, "replace_contraction_max": 40,
 }
 SLEEVE_PROXIES = {
     "Treasuries": [("IEF", "7-10y Treasuries", 0.6), ("TLT", "20+y Treasuries", 0.4)],
@@ -128,7 +133,7 @@ def _monitor(prior: dict, strategies: dict, analyses: dict, companies: dict, ris
         trail_high = max(float(h.get("trail_high") or entry), price)
         gain = (price / entry - 1) * 100 if entry else 0.0
         ta = (technicals or {}).get(t) or {}
-        stops = _stop_levels(entry, ta.get("atr20"), price, trail_high, gain) if price else h.get("stops")
+        stops = _stop_levels(entry, ta.get("atr20"), price, trail_high, gain, h.get("stops")) if price else h.get("stops")
         pending = []
         rule_status = h.get("rule_status")
         if a:
@@ -179,6 +184,73 @@ def _monitor(prior: dict, strategies: dict, analyses: dict, companies: dict, ris
             if row.get("pending_actions") and not any(a["ticker"] == row["ticker"] for a in alerts):
                 alerts.append({"ticker": row["ticker"], "name": row.get("name"), "weight": row["weight"], "pnl_pct": row.get("pnl_pct"), "actions": row["pending_actions"],
                                "long_term_gain_eligible": row.get("long_term_gain_eligible")})
+    # --- replacement queue and replace-on-exit
+    gate_open = bool((regime.get("index_gate") or {}).get("open", True)) if RULES["regime_gate"] else True
+    cooldowns = {k: v for k, v in (prior.get("cooldowns") or {}).items() if date.fromisoformat(v) > today}
+    for e in exits:
+        cooldowns[e["ticker"]] = (today + timedelta(days=RULES["stopout_cooldown_days"])).isoformat()
+    pm_detail = (pm_inputs or {}).get("pm_detail") or {}
+    queue = _build_queue(strategies, analyses, companies, technicals or {}, rot, gate_open, pm_detail, {h["ticker"] for h in holdings}, prior.get("queue"), cooldowns, today)
+    recent_exits = [d for d in (prior.get("recent_exit_dates") or []) if (today - date.fromisoformat(d)).days <= 10][-RULES["systemic_exits_window_runs"]:]
+    month_key = today.strftime("%Y-%m")
+    n_repl = prior.get("replacements_this_month", 0) if prior.get("replacements_month") == month_key else 0
+    replacement_note = None
+    if exits:
+        contraction = probs.get("Contraction") or 0
+        systemic = len(exits) > 1 or bool(recent_exits) or not gate_open or contraction > RULES["replace_contraction_max"]
+        eligible = [q for q in queue if q["eligible"]]
+        if not RULES["replace_on_exit"]:
+            replacement_note = "Replacement on exit is off: the freed weight waits for the recalibration"
+        elif systemic:
+            why = "two exits at once" if len(exits) > 1 else "another exit within the last 5 runs" if recent_exits else "regime gate closed" if not gate_open else f"Contraction probability {contraction:.0f}%"
+            replacement_note = f"Systemic exit ({why}): the freed weight stays in cash until the recalibration"
+        elif n_repl >= RULES["replacements_per_month"]:
+            replacement_note = f"Replacement limit reached ({RULES['replacements_per_month']} this month): cash until the recalibration"
+        elif not eligible:
+            replacement_note = "Queue empty (no name has passed every gate on 3 consecutive runs): cash until a replacement appears"
+        else:
+            sector_w: dict[str, float] = {}
+            for h in holdings:
+                sector_w[h["sector"]] = sector_w.get(h["sector"], 0) + h["weight"]
+            prices_all = (pm_inputs or {}).get("prices", {})
+            cl_map = pm.clusters(pm.returns_matrix(prices_all, [h["ticker"] for h in holdings] + [q["ticker"] for q in eligible[:10]])) if prices_all else {}
+            cluster_w: dict[int, float] = {}
+            for h in holdings:
+                cid = cl_map.get(h["ticker"])
+                if cid is not None:
+                    cluster_w[cid] = cluster_w.get(cid, 0) + h["weight"]
+            for q in eligible:
+                t = q["ticker"]; a = analyses[t]; ta = (technicals or {}).get(t) or {}
+                price = float(a["price"])
+                stops = _stop_levels(price, ta.get("atr20"), price, price, 0.0)
+                stop_dist = (stops["stop_distance_pct"] / 100) if stops.get("stop_distance_pct") and stops["stop_distance_pct"] > 0 else 0.12
+                w = min(RULES["initial_max_weight"], RULES["risk_per_position_pct"] / 100 / stop_dist, freed)
+                if w < RULES["min_weight"]:
+                    continue
+                if sector_w.get(q["sector"], 0) + w > RULES["sector_cap"]:
+                    continue
+                cid = cl_map.get(t)
+                if cid is not None and cluster_w.get(cid, 0) + w > pm.RULES["cluster_cap"]:
+                    continue
+                st = strategies.get(t, {})
+                holdings.append({"ticker": t, "name": q["name"], "sector": q["sector"], "top_theme": q["top_theme"], "weight": r(w, 4), "dollars": r(w * portfolio_value, 0),
+                                 "shares": r(w * portfolio_value / price, 1), "price": price, "entry_price": r(price, 2), "pnl_pct": 0.0, "trail_high": r(price, 2), "stops": stops,
+                                 "conviction": q["conviction"], "lt_conviction": None, "attention": None, "hfe_score": None, "hfe_mult": None, "pm": pm_detail.get(t),
+                                 "opportunity": q["opportunity"], "gap": q["gap"], "reality": st.get("reality"), "narrative": st.get("narrative"), "pricing": st.get("pricing"),
+                                 "technical": {k: ta.get(k) for k in ("score", "passes", "stage", "ready", "rsi14", "atr_pct", "rs_6m", "pct_from_52w_high")} if ta else None,
+                                 "rationale": [c["label"] for c in st.get("checks", []) if c.get("ok")][:4],
+                                 "notes": [f"Replacement for {exits[0]['ticker']}: next in line after {q['runs']} consecutive runs passing every gate"],
+                                 "held_days": 0, "long_term_gain_eligible": False, "status": "new", "entered": today.isoformat(), "entry_rules": st.get("break_rules", []),
+                                 "rule_status": None, "prior_weight": None, "tech_fail_runs": 0, "brief_flags": 0, "brief_notes": []})
+                trades.append({"action": "BUY", "ticker": t, "name": q["name"], "from": 0.0, "to": r(w, 4), "dollars": r(w * portfolio_value, 0),
+                               "reason": f"Replacement for {exits[0]['ticker']} from the queue (conviction {q['conviction']}, entry score {q['entry_score']}) · stop {stops['active_stop']}"})
+                freed -= w; n_repl += 1
+                replacement_note = f"{exits[0]['ticker']} replaced by {t} from the queue"
+                queue = [x for x in queue if x["ticker"] != t]
+                break
+            else:
+                replacement_note = "No queued name fits the sector / cluster caps at a 2% minimum: cash until the recalibration"
+        recent_exits = recent_exits + [today.isoformat()]
     sleeves = [dict(x) for x in prior.get("sleeves", [])]
     if freed > 0:
         cash = next((x for x in sleeves if x["symbol"] == "CASH"), None)
@@ -201,11 +273,13 @@ def _monitor(prior: dict, strategies: dict, analyses: dict, companies: dict, ris
            "equity_weight": r(sum(h["weight"] for h in holdings), 4), "cash_weight": r(sum(x["weight"] for x in sleeves if x["sleeve"] == "Cash"), 4),
            "nav_index": r(nav_index, 4), "nav_peak": r(nav_peak, 4), "drawdown_pct": r((nav_index / nav_peak - 1) * 100, 2), "period_return_pct": r(period_ret * 100, 2),
            "risk_label": risk.get("label"), "regime": regime.get("regime", {}).get("label"),
-           "is_initial": False, "prior_as_of": prior.get("as_of")}
+           "is_initial": False, "prior_as_of": prior.get("as_of"),
+           "queue": queue, "cooldowns": cooldowns, "recent_exit_dates": recent_exits, "replacements_month": month_key, "replacements_this_month": n_repl,
+           "replacement_note": replacement_note}
     if pm_inputs and holdings:
         out["hedge"] = pm.hedge_engine(holdings, pm_inputs.get("prices", {}), risk, regime, flows, portfolio_value)
     out["stats"] = {**prior.get("stats", {}), "positions": len(holdings), "book_pnl_pct": r(wmean([(h.get("pnl_pct"), h["weight"]) for h in holdings]), 1),
-                    "turnover": r(freed, 3), "pending_alerts": len(alerts)}
+                    "turnover": r(sum(abs(t["to"] - t["from"]) for t in trades) / 2, 3), "pending_alerts": len(alerts)}
     out.pop("memo", None)   # the memo belongs to the recalibration snapshot; the daily monitor keeps a pointer instead
     out["memo_from"] = prior.get("memo_from") or prior.get("as_of")
     out["memo"] = prior.get("memo")
@@ -213,6 +287,68 @@ def _monitor(prior: dict, strategies: dict, analyses: dict, companies: dict, ris
 
 
 _MONITOR_PM: dict = {}
+
+
+def _entry_gates(t: str, st: dict, a: dict, ta: Optional[dict], company: dict, rot: dict, gate_open: bool, pmd: Optional[dict], today: date) -> Optional[str]:
+    """The valuation-trend entry gates for a NEW position, in order. Returns the first failing gate's reason, or None when all pass."""
+    if not gate_open:
+        return "Regime gate closed"
+    sec_rot = rot.get(company.get("sector"))
+    if sec_rot is not None and sec_rot < RULES["rotation_entry_min"]:
+        return f"Capital leaving {company.get('sector')} (rotation {sec_rot:+.0f})"
+    if st.get("opportunity_score") is None or st.get("expectations_gap") is None:
+        return "Not scored"
+    if st["opportunity_score"] < RULES["min_opportunity"] or st["expectations_gap"] < RULES["min_gap"]:
+        return f"Opportunity {st['opportunity_score']:.0f} / gap {st['expectations_gap']:+.0f} below the screen"
+    if (a.get("data_quality") or {}).get("ttm_quarters", 0) < RULES["min_ttm_quarters"]:
+        return "Fewer than 8 quarters of data"
+    if RULES["technical_required"] and ta is not None and (not ta.get("ready") or (ta.get("score") or 0) < RULES["technical_min_score"]):
+        return f"Technical gate: {ta.get('stage')} ({ta.get('passes')}/8)"
+    filed = (a.get("latest") or {}).get("filed")
+    if filed and filed not in ("None", "NaT"):
+        try:
+            d = 91 - (today - date.fromisoformat(str(filed)[:10])).days
+            if 0 <= d <= RULES["earnings_blackout_days"]:
+                return f"Earnings in ~{d} days"
+        except ValueError:
+            pass
+    if pmd:
+        if (pmd["entry"]["score"] or 0) < pm.RULES["entry_min"]:
+            return f"Entry score {pmd['entry']['score']} < {pm.RULES['entry_min']}"
+        er = pmd.get("expected_return")
+        if er and er["band"] in ("reduce", "exit_candidate"):
+            return f"Expected return {er['expected_return_pct']}% ({er['band']})"
+    return None
+
+
+def _build_queue(strategies: dict, analyses: dict, companies: dict, technicals: dict, rot: dict, gate_open: bool, pm_detail: dict,
+                 held: set, prior_queue: list, cooldowns: dict, today: date) -> list[dict]:
+    """Names passing every entry gate today, ranked by the conviction core (opportunity x gap x entry score); `runs` counts
+    consecutive passes and a name is eligible for replacement after RULES['queue_runs'] of them."""
+    prev_runs = {q["ticker"]: q.get("runs", 0) for q in prior_queue or []}
+    rows = []
+    for t, st in strategies.items():
+        a = analyses.get(t)
+        if not a or t in held or not a.get("price"):
+            continue
+        until = cooldowns.get(t)
+        if until and date.fromisoformat(until) > today:
+            continue
+        pmd = pm_detail.get(t)
+        why = _entry_gates(t, st, a, technicals.get(t), companies.get(t, {}), rot, gate_open, pmd, today)
+        if why:
+            continue
+        opp, gap = st["opportunity_score"], st["expectations_gap"]
+        core = (opp - 50) * (1 + max(gap, 0) / 50) * (0.6 + 0.8 * (pmd["entry"]["score"] or 0) / 100 if pmd else 1.0)
+        runs = prev_runs.get(t, 0) + 1
+        er = (pmd or {}).get("expected_return") or {}
+        rows.append({"ticker": t, "name": companies.get(t, {}).get("name", t), "sector": companies.get(t, {}).get("sector"), "runs": runs,
+                     "eligible": runs >= RULES["queue_runs"], "conviction": r(core, 1), "opportunity": opp, "gap": gap, "price": a.get("price"),
+                     "entry_score": (pmd or {}).get("entry", {}).get("score"), "expected_return_pct": er.get("expected_return_pct"),
+                     "trend": {k: (technicals.get(t) or {}).get(k) for k in ("passes", "score", "stage")},
+                     "top_theme": (st.get("theme_exposures") or [{}])[0].get("theme") if st.get("theme_exposures") else None})
+    rows.sort(key=lambda z: (-z["eligible"], -z["conviction"]))
+    return rows[:RULES["queue_size"]]
 
 
 def _pm_detail(t: str, a: dict, st: dict, sc: dict, company: dict, ta: dict, pm_inputs: dict, events: Optional[dict], hfe_c: Optional[dict],
@@ -243,8 +379,9 @@ def _theme_weights(exposures: list[dict]) -> dict[str, float]:
     return {e["theme_id"]: e["effective"] for e in exposures if e.get("effective")}
 
 
-def _stop_levels(entry: float, atr_val: Optional[float], price_now: float, trail_high: float, gain_pct: float) -> dict:
-    """Initial stop, trailing stop and the active stop for a position."""
+def _stop_levels(entry: float, atr_val: Optional[float], price_now: float, trail_high: float, gain_pct: float, prev: Optional[dict] = None) -> dict:
+    """Initial stop, trailing stop and the active stop for a position. `prev` = the position's stops from the previous run:
+    the Chandelier stop ratchets, so a widening ATR can never lower it."""
     atr_dist = (RULES["initial_stop_atr_mult"] * atr_val) if atr_val else entry * RULES["initial_stop_min_pct"] / 100
     initial = entry - max(atr_dist, entry * RULES["initial_stop_min_pct"] / 100)
     hard = entry * (1 - RULES["hard_loss_cap_pct"] / 100)
@@ -252,7 +389,14 @@ def _stop_levels(entry: float, atr_val: Optional[float], price_now: float, trail
     trailing = None
     if gain_pct >= RULES["trail_activation_gain_pct"] and atr_val:
         trailing = trail_high - RULES["trail_atr_mult"] * atr_val       # Chandelier: highest close since entry - 3 x ATR, never lowered
+    if prev:
+        if trailing is not None and prev.get("trailing_stop"):
+            trailing = max(trailing, float(prev["trailing_stop"]))
+        elif trailing is None and prev.get("trailing_stop"):
+            trailing = float(prev["trailing_stop"])
     active = max([x for x in (initial, trailing) if x is not None])
+    if prev and prev.get("active_stop"):
+        active = max(active, float(prev["active_stop"]))
     return {"initial_stop": r(initial, 2), "trailing_stop": r(trailing, 2), "active_stop": r(active, 2), "hard_stop": r(hard, 2),
             "stop_distance_pct": r((price_now - active) / price_now * 100, 1) if price_now else None}
 
@@ -344,7 +488,7 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], scores: dict
         trail_high = max(float(h.get("trail_high") or entry), price)
         gain = (price / entry - 1) * 100
         ta = technicals.get(t) or {}
-        stops = _stop_levels(entry, ta.get("atr20"), price, trail_high, gain)
+        stops = _stop_levels(entry, ta.get("atr20"), price, trail_high, gain, h.get("stops"))
         ctx = {"latest": a["latest"], "momentum": a["momentum"], "sector_rotation": rot.get(companies[t]["sector"]),
                "sector_rotation_prev": rot_prev.get(companies[t]["sector"]), "adverse_regime_prob": adverse, "as_of": today,
                "sector_rotation_history": (rotation_history or {}).get(companies[t]["sector"], []),
@@ -523,7 +667,8 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], scores: dict
         ta = c["technical"] or {}
         price = c["price"] or 0
         entry = float(prior_holdings[c["ticker"]].get("entry_price") or price) if c["incumbent"] else price
-        stops = _stop_levels(entry, ta.get("atr20"), price, max(entry, price), (price / entry - 1) * 100 if entry else 0) if price else None
+        stops = _stop_levels(entry, ta.get("atr20"), price, max(float(prior_holdings[c["ticker"]].get("trail_high") or entry), price) if c["incumbent"] else price,
+                             (price / entry - 1) * 100 if entry else 0, prior_holdings[c["ticker"]].get("stops") if c["incumbent"] else None) if price else None
         stop_dist = (stops["stop_distance_pct"] / 100) if stops and stops["stop_distance_pct"] and stops["stop_distance_pct"] > 0 else 0.12
         risk_w = risk_budget / stop_dist                         # weight such that a stop-out costs 1% of the book
         conv_scalar = 0.5 + 0.5 * (c["conviction"] / top_conv if top_conv > 0 else 0.5)
@@ -617,6 +762,11 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], scores: dict
         })
     holdings.sort(key=lambda h: -h["weight"])
 
+    cooldowns_out = {k: v for k, v in ((prior or {}).get("cooldowns") or {}).items() if date.fromisoformat(v) > today}
+    for e in exits:
+        if "stop" in (e.get("reason") or "").lower() or "Stage-4" in (e.get("reason") or ""):
+            cooldowns_out[e["ticker"]] = (today + timedelta(days=RULES["stopout_cooldown_days"])).isoformat()
+
     # 6. Trades
     trades = []
     for e in exits:
@@ -659,6 +809,9 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], scores: dict
         "longterm_thesis": (longterm or {}).get("thesis"), "longterm_top_themes": [(t["theme"], t["conviction"]) for t in (longterm or {}).get("theme_ranking", [])[:6]],
         "holdings": holdings, "sleeves": sleeves, "trades": trades, "exits": exits, "skipped": skipped[:15], "rejected_technical": rejected[:25],
         "cooldown": cooldown, "stopouts": stopouts,
+        "queue": _build_queue(strategies, analyses, companies, technicals, rot, gate_open, (pm_inputs or {}).get("pm_detail") or {}, {h["ticker"] for h in holdings},
+                              (prior or {}).get("queue"), cooldowns_out, today),
+        "cooldowns": cooldowns_out, "recent_exit_dates": [], "replacements_month": today.strftime("%Y-%m"), "replacements_this_month": 0, "replacement_note": None,
         "nav_index": r(nav_index, 4), "nav_peak": r(nav_peak, 4), "drawdown_pct": r(drawdown_pct, 2), "period_return_pct": r(period_ret * 100, 2),
         "ladder_note": ladder_note, "regime_gate": {**gate, "open": gate_open, "applied": RULES["regime_gate"]},
         "watchlist": [{"ticker": c["ticker"], "name": c["name"], "opportunity": c["opportunity"], "gap": c["gap"], "conviction": r(c["conviction"], 1),

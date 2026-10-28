@@ -188,6 +188,15 @@ recalibration) without trading. The only intra-month exit is the 12% hard loss c
 position has been held 365 days (long-term capital-gains treatment) unless a rule fires. Holdings show days held and
 long-term eligibility.
 
+**Replacement queue (both stock books).** Every run ranks the names that pass every entry gate but are not held; a name
+is *eligible* after 3 consecutive runs ("Next in line" on the portfolio pages). When one position exits mid-month on its
+own (one exit, regime gate open, Contraction below 40%, no other exit in the last 5 runs) the freed weight is refilled
+from the top of the queue the same morning, sized by the normal rules and under the sector / cluster caps; a systemic
+exit leaves the cash for the recalibration. At most 3 replacements a month; a stopped-out name is barred for 30 days.
+The Chandelier trailing stop ratchets (a widening ATR can no longer lower it). Hindcast rows `daily_stops` /
+`replace_on_exit` show why exits stay monthly: daily stops cost ~15 pts a year on this universe, while refilling from
+the queue recovers ~5 pts versus holding cash.
+
 ## Thesis v2 — Causal Futures Engine
 
 A probabilistic thesis ledger (`backend/brain/engines/causal.py`): formalize a thesis measurably → decompose the

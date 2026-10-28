@@ -685,11 +685,6 @@ def compute_all(frames: dict, as_of: date, use_llm: bool, llm_top_n: Optional[in
     ev_prior = load_prior("events") or {}
     pm_inputs = {"prices": prices, "sector_etf": {sec: prices.get(etf) for sec, etf in SECTOR_ETF.items()}, "sector_medians": sector_medians,
                  "earnings_week": ev_prior.get("earnings", {}).get("this_week", [])}
-    portfolio = portfolio_engine.compute(strategies, analyses, scores, companies, risk, flows, regime, themes_by_id,
-                                         prior_pf, settings.portfolio_value, as_of, prior_flows,
-                                         technicals=technicals, longterm=longterm, attention=attention, briefs=load_briefs(5),
-                                         rotation_history=rotation_history, hfe_ranking=load_prior("thesis_v2_opportunities"),
-                                         events=load_prior("events"), pm_inputs=pm_inputs)
     # per-company portfolio-management detail (entry score, expected return, momentum, catalysts) for the company pages
     from .engines.portfolio import _pm_detail
     hfe_c = {c["ticker"]: c for c in (load_prior("thesis_v2_opportunities") or {}).get("candidates", [])}
@@ -700,6 +695,12 @@ def compute_all(frames: dict, as_of: date, use_llm: bool, llm_top_n: Optional[in
             pm_detail[t] = _pm_detail(t, a, strategies[t], scores[t], companies[t], technicals.get(t) or {}, pm_inputs, ev_prior, hfe_c.get(t), att_c.get(t), regime, flows, as_of)
         except Exception as e:
             log(f"pm: {t}: {e}")
+    pm_inputs["pm_detail"] = pm_detail
+    portfolio = portfolio_engine.compute(strategies, analyses, scores, companies, risk, flows, regime, themes_by_id,
+                                         prior_pf, settings.portfolio_value, as_of, prior_flows,
+                                         technicals=technicals, longterm=longterm, attention=attention, briefs=load_briefs(5),
+                                         rotation_history=rotation_history, hfe_ranking=load_prior("thesis_v2_opportunities"),
+                                         events=load_prior("events"), pm_inputs=pm_inputs)
     log(f"engine: entry scores computed for {len(pm_detail)} names; attractive entries: "
         + ", ".join(f"{t} {d['entry']['score']}" for t, d in sorted(pm_detail.items(), key=lambda x: -(x[1]['entry']['score'] or 0))[:8]))
     log(f"engine: portfolio = {portfolio['stats']['positions']} positions, equity {portfolio['equity_weight']:.0%} (cap {portfolio['equity_cap']:.0%}, "

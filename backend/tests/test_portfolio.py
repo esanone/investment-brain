@@ -189,3 +189,63 @@ def test_hindcast_perf_reports_fractions():
     from brain.hindcast import _perf
     p = _perf([0.10, -0.05, 0.10, 0.10], 4)
     assert 0.2 < p["cagr"] < 0.3 and -0.06 < p["max_drawdown"] <= -0.049
+
+
+def test_trailing_stop_ratchets_up_only():
+    from brain.engines.portfolio import _stop_levels
+    first = _stop_levels(100.0, 3.0, 120.0, 120.0, 20.0)                 # trail = 120 - 9 = 111
+    wider = _stop_levels(100.0, 6.0, 118.0, 120.0, 18.0, prev=first)       # ATR doubled: raw trail 102, must stay 111
+    assert wider["trailing_stop"] == first["trailing_stop"] == 111.0 and wider["active_stop"] == 111.0
+    higher = _stop_levels(100.0, 3.0, 130.0, 130.0, 30.0, prev=wider)      # new high: 130 - 9 = 121
+    assert higher["active_stop"] == 121.0
+
+
+def _queue_world():
+    from brain.engines import portfolio as P
+    st = lambda opp, gap: {"opportunity_score": opp, "expectations_gap": gap, "theme_exposures": [], "break_rules": [], "checks": []}
+    a = lambda: {"price": 50.0, "latest": {"filed": "2026-08-01"}, "data_quality": {"ttm_quarters": 12}, "momentum": {}}
+    ta_ok = {"ready": True, "score": 90, "passes": 8, "stage": "stage2_uptrend", "atr20": 1.5}
+    pmd = lambda e, er: {"entry": {"score": e, "label": "x"}, "expected_return": {"band": er, "expected_return_pct": 20.0}, "momentum": {"warnings": []}}
+    strategies = {"AAA": st(70, 20), "BBB": st(65, 10), "CCC": st(70, 20), "DDD": st(40, 5)}
+    analyses = {t: a() for t in strategies}
+    companies = {t: {"name": t, "sector": "Technology"} for t in strategies}
+    technicals = {"AAA": ta_ok, "BBB": ta_ok, "CCC": {**ta_ok, "ready": False, "score": 50, "passes": 4, "stage": "emerging"}, "DDD": ta_ok}
+    pm_detail = {"AAA": pmd(72, "build"), "BBB": pmd(65, "accumulate"), "CCC": pmd(80, "build"), "DDD": pmd(70, "build")}
+    return P, strategies, analyses, companies, technicals, pm_detail
+
+
+def test_queue_requires_consecutive_passes_and_respects_cooldown():
+    from datetime import date
+    P, strategies, analyses, companies, technicals, pm_detail = _queue_world()
+    q1 = P._build_queue(strategies, analyses, companies, technicals, {"Technology": 10}, True, pm_detail, set(), [], {}, date(2026, 10, 1))
+    assert [q["ticker"] for q in q1] == ["AAA", "BBB"] and not any(q["eligible"] for q in q1)      # CCC fails trend, DDD fails the screen
+    q2 = P._build_queue(strategies, analyses, companies, technicals, {"Technology": 10}, True, pm_detail, set(), q1, {}, date(2026, 10, 2))
+    q3 = P._build_queue(strategies, analyses, companies, technicals, {"Technology": 10}, True, pm_detail, set(), q2, {"AAA": "2026-11-01"}, date(2026, 10, 5))
+    assert [(q["ticker"], q["runs"], q["eligible"]) for q in q3] == [("BBB", 3, True)]             # AAA is in cool-down
+
+
+def test_monitor_replaces_hard_cap_exit_from_queue():
+    from datetime import date
+    from brain.engines import portfolio as P
+    _, strategies, analyses, companies, technicals, pm_detail = _queue_world()
+    held = {"ticker": "HHH", "name": "HHH", "sector": "Health Care", "weight": 0.05, "price": 100.0, "entry_price": 100.0, "entered": "2026-10-01", "trail_high": 100.0,
+            "stops": {"initial_stop": 92.0, "trailing_stop": None, "active_stop": 92.0, "hard_stop": 88.0, "stop_distance_pct": 8.0}, "entry_rules": []}
+    strategies["HHH"] = {"opportunity_score": 60, "expectations_gap": 5, "theme_exposures": [], "break_rules": [], "checks": []}
+    analyses["HHH"] = {"price": 85.0, "latest": {"filed": "2026-08-01"}, "data_quality": {"ttm_quarters": 12}, "momentum": {}}
+    companies["HHH"] = {"name": "HHH", "sector": "Health Care"}
+    prior = {"holdings": [held], "sleeves": [{"symbol": "CASH", "name": "Cash", "sleeve": "Cash", "weight": 0.5}], "as_of": "2026-10-10",
+             "last_recalibration": "2026-10-01", "nav_index": 1.0, "nav_peak": 1.0, "stats": {},
+             "queue": [{"ticker": "AAA", "runs": 3}, {"ticker": "BBB", "runs": 1}], "cooldowns": {}}
+    P._MONITOR_PM["inputs"] = {"pm_detail": pm_detail, "prices": {}}
+    regime = {"regime": {"label": "Goldilocks", "probabilities": {"Contraction": 25}}, "index_gate": {"open": True}}
+    out = P._monitor(prior, strategies, analyses, companies, {"label": "Stable"}, {"sector_rotation": {"Technology": 10, "Health Care": 10}}, regime, {}, technicals, [],
+                     {}, 100000.0, date(2026, 10, 13), None, date(2026, 10, 1))
+    assert [e["ticker"] for e in out["exits"]] == ["HHH"]
+    assert [h["ticker"] for h in out["holdings"]] == ["AAA"] and out["holdings"][0]["status"] == "new"
+    assert out["cooldowns"]["HHH"] == "2026-11-12" and out["replacements_this_month"] == 1
+    assert any(t["action"] == "BUY" and t["ticker"] == "AAA" for t in out["trades"])
+    # a second exit within the window is systemic: no replacement
+    out2 = P._monitor({**out, "holdings": [{**held, "ticker": "III", "name": "III"}], "as_of": "2026-10-13"}, {**strategies, "III": strategies["HHH"]},
+                      {**analyses, "III": analyses["HHH"]}, {**companies, "III": companies["HHH"]}, {"label": "Stable"},
+                      {"sector_rotation": {"Technology": 10, "Health Care": 10}}, regime, {}, technicals, [], {}, 100000.0, date(2026, 10, 14), None, date(2026, 10, 1))
+    assert out2["holdings"] == [] and "Systemic" in out2["replacement_note"]

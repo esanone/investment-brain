@@ -15,7 +15,7 @@ Exits: stop (initial / Chandelier trail), Stage-4 or trend-template failure, the
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional
 
 from . import pm
@@ -36,6 +36,10 @@ RULES = {
     "technical_min_score": 75, "rotation_entry_min": -30, "earnings_blackout_days": 5, "trend_fail_runs": 2,
     "valuation_rule": "exclude only when price is above the bull fair-value scenario",
     "recalibration_cadence": "monthly", "intra_month_exits": "hard_stop",
+    # Replacement queue (same discipline as the valuation-trend book): favoured names that pass every gate on 3 consecutive
+    # runs are next in line; a lone hard-stop exit with the market gate open is refilled from the queue the same morning.
+    "queue_runs": 3, "queue_size": 12, "replace_on_exit": True, "replacements_per_month": 3, "stopout_cooldown_days": 30,
+    "systemic_exits_window_runs": 5, "replace_contraction_max": 40,
 }
 TREND_MULT = {"strengthening": 1.0, "accelerating": 1.0, "stable": 0.9, "steady": 0.9, "emerging": 0.9, "weakening": 0.6, "fading": 0.6}
 
@@ -165,6 +169,66 @@ def _valuation(er: Optional[dict], price: Optional[float]) -> dict:
             "confidence": er.get("confidence")}
 
 
+def _gate_rows(ts: dict, keep: dict, exited: set, companies: dict, analyses: dict, technicals: dict, px, val, tech, rot: dict, gate_open: bool, today: date):
+    """Thesis favour first, then the bull ceiling, then the market / sector / trend gates and the earnings blackout."""
+    funnel = {"universe": len(ts), "favoured": 0, "headwind": 0, "above_bull": 0, "market_gate": 0, "sector_gate": 0, "trend_gate": 0, "earnings": 0, "caps": 0, "selected": 0}
+    cand_rows, passed = [], []
+    for t, x in sorted(ts.items(), key=lambda kv: -(kv[1]["thesis_score"] or 0)):
+        if x["headwind"] and (x["thesis_score"] or 0) >= RULES["min_thesis_score"]:
+            funnel["headwind"] += 1
+        if not x["favoured"] and t not in keep:
+            continue
+        p, c = px(t), companies.get(t)
+        if not p or not c or t in exited:
+            continue
+        funnel["favoured"] += 1
+        v, tk, ta = val(t), tech(t), technicals.get(t) or {}
+        row = {"ticker": t, "name": c["name"], "sector": c["sector"], **{k: x[k] for k in ("thesis_score", "thesis_probability", "components", "drivers", "theses", "top_theme")},
+               "valuation": v, "technical": tk, "incumbent": t in keep}
+        status, reason = "passed", None
+        if t not in keep:
+            if v["above_bull"]:
+                status, reason = "above_bull", f"Price {v['price']} above the bull scenario {v['bull']}"
+            elif not gate_open:
+                status, reason = "market_gate", "Market gate closed: index below its 10-month average and behind T-bills"
+            elif rot.get(c["sector"]) is not None and rot[c["sector"]] < RULES["rotation_entry_min"]:
+                status, reason = "sector_gate", f"Capital leaving {c['sector']} (rotation {rot[c['sector']]:+.0f})"
+            elif ta and (not ta.get("ready") or (ta.get("score") or 0) < RULES["technical_min_score"]):
+                status, reason = "trend_gate", f"Trend gate: {ta.get('stage')} ({ta.get('passes')}/8 criteria)"
+            else:
+                filed = (analyses[t].get("latest") or {}).get("filed")
+                try:
+                    days = 91 - (today - date.fromisoformat(str(filed)[:10])).days if filed else None
+                except ValueError:
+                    days = None
+                if days is not None and 0 <= days <= RULES["earnings_blackout_days"]:
+                    status, reason = "earnings", f"Earnings expected in ~{days} days; entry deferred"
+        if status != "passed":
+            funnel[status] += 1
+        row["status"], row["reason"] = status, reason
+        cand_rows.append(row)
+        if status == "passed":
+            passed.append(row)
+    return funnel, cand_rows, passed
+
+
+def _queue(passed: list[dict], held: set, prior_queue: list, cooldowns: dict, today: date) -> list[dict]:
+    prev_runs = {q["ticker"]: q.get("runs", 0) for q in prior_queue or []}
+    rows = []
+    for c in passed:
+        t = c["ticker"]
+        if t in held or c.get("incumbent"):
+            continue
+        until = cooldowns.get(t)
+        if until and date.fromisoformat(until) > today:
+            continue
+        runs = prev_runs.get(t, 0) + 1
+        rows.append({"ticker": t, "name": c["name"], "sector": c["sector"], "runs": runs, "eligible": runs >= RULES["queue_runs"], "thesis_score": c["thesis_score"],
+                     "thesis_probability": c["thesis_probability"], "top_theme": c.get("top_theme"), "theses": c.get("theses"), "valuation": c["valuation"], "technical": c["technical"]})
+    rows.sort(key=lambda z: (-z["eligible"], -(z["thesis_score"] or 0)))
+    return rows[:RULES["queue_size"]]
+
+
 # ------------------------------------------------------------------ construction
 def compute(strategies: dict[str, dict], analyses: dict[str, dict], companies: dict[str, dict], technicals: dict[str, dict], pm_detail: dict[str, dict],
             flows: dict, regime: dict, risk: dict, longterm: Optional[dict], briefs: list[dict], records: list[dict], prices: dict,
@@ -216,7 +280,7 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], companies: d
             entry = float(h.get("entry_price") or p)
             trail_high = max(float(h.get("trail_high") or entry), p)
             ta = technicals.get(t) or {}
-            stops = _stop_levels(entry, ta.get("atr20"), p, trail_high, (p / entry - 1) * 100)
+            stops = _stop_levels(entry, ta.get("atr20"), p, trail_high, (p / entry - 1) * 100, h.get("stops"))
             x, v = ts.get(t, {}), val(t)
             if p <= stops["hard_stop"]:
                 exits.append({"ticker": t, "name": h.get("name"), "prior_weight": h["weight"], "reason": f"Hard stop: {p:.2f} at or below {stops['hard_stop']:.2f}",
@@ -236,9 +300,62 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], companies: d
             held.append({**h, "price": r(p, 2), "trail_high": r(trail_high, 2), "pnl_pct": r((p / entry - 1) * 100, 1), "stops": stops, "valuation": v, "technical": tech(t),
                          "thesis_score": x.get("thesis_score", h.get("thesis_score")), "thesis_probability": x.get("thesis_probability", h.get("thesis_probability")),
                          "components": x.get("components", h.get("components")), "drivers": x.get("drivers", h.get("drivers")), "pending_actions": pend, "status": "held"})
+        trades = [{"action": "SELL", "ticker": e["ticker"], "name": e["name"], "from": e["prior_weight"], "to": 0.0,
+                   "dollars": r(-e["prior_weight"] * portfolio_value, 0), "reason": e["reason"]} for e in exits]
+        # daily queue: favoured names passing every gate today, and replacement of a lone hard-stop exit
+        cooldowns = {k: v for k, v in (prior.get("cooldowns") or {}).items() if date.fromisoformat(v) > today}
+        for e in exits:
+            cooldowns[e["ticker"]] = (today + timedelta(days=RULES["stopout_cooldown_days"])).isoformat()
+        keep_now = {h["ticker"]: {} for h in held}
+        funnel_m, cand_m, passed_m = _gate_rows(ts, keep_now, {e["ticker"] for e in exits}, companies, analyses, technicals, px, val, tech, rot, gate_open, today)
+        queue = _queue(passed_m, set(keep_now), prior.get("queue"), cooldowns, today)
+        recent_exits = [d for d in (prior.get("recent_exit_dates") or []) if (today - date.fromisoformat(d)).days <= 10][-RULES["systemic_exits_window_runs"]:]
+        month_key = today.strftime("%Y-%m")
+        n_repl = prior.get("replacements_this_month", 0) if prior.get("replacements_month") == month_key else 0
+        note = None
+        if exits:
+            freed = sum(e["prior_weight"] for e in exits)
+            contraction = (regime.get("regime", {}).get("probabilities", {}) or {}).get("Contraction") or 0
+            systemic = len(exits) > 1 or bool(recent_exits) or not gate_open or contraction > RULES["replace_contraction_max"]
+            eligible = [q for q in queue if q["eligible"]]
+            if not RULES["replace_on_exit"]:
+                note = "Replacement on exit is off"
+            elif systemic:
+                note = "Systemic exit (" + ("two exits at once" if len(exits) > 1 else "another exit within the last 5 runs" if recent_exits else "market gate closed" if not gate_open
+                                           else f"Contraction probability {contraction:.0f}%") + "): the freed weight stays in cash until the recalibration"
+            elif n_repl >= RULES["replacements_per_month"]:
+                note = f"Replacement limit reached ({RULES['replacements_per_month']} this month)"
+            elif not eligible:
+                note = "Queue empty (no favoured name has passed every gate on 3 consecutive runs): cash until a replacement appears"
+            else:
+                sector_w = {}
+                for h in held:
+                    sector_w[h["sector"]] = sector_w.get(h["sector"], 0) + h["weight"]
+                for q in eligible:
+                    t = q["ticker"]; p = px(t); ta = technicals.get(t) or {}
+                    stops = _stop_levels(p, ta.get("atr20"), p, p, 0.0)
+                    dist = stops["stop_distance_pct"] / 100 if stops.get("stop_distance_pct") and stops["stop_distance_pct"] > 0 else 0.12
+                    prob = q["thesis_probability"] or 0.5
+                    w = min(RULES["max_weight"] * prob, RULES["risk_per_position_pct"] / 100 / dist, freed)
+                    if w < RULES["min_weight"] or sector_w.get(q["sector"], 0) + w > RULES["sector_cap"]:
+                        continue
+                    x = ts[t]
+                    held.append({"ticker": t, "name": q["name"], "sector": q["sector"], **{k: x[k] for k in ("thesis_score", "thesis_probability", "components", "drivers", "theses", "top_theme")},
+                                 "valuation": q["valuation"], "technical": q["technical"], "weight": r(w, 4), "dollars": r(w * portfolio_value, 0), "shares": r(w * portfolio_value / p, 1),
+                                 "price": r(p, 2), "entry_price": r(p, 2), "pnl_pct": 0.0, "trail_high": r(p, 2), "stops": stops, "tech_fail_runs": 0, "entered": today.isoformat(),
+                                 "status": "new", "prior_weight": None, "notes": [f"Replacement for {exits[0]['ticker']}: next in line after {q['runs']} consecutive runs passing every gate"],
+                                 "pending_actions": []})
+                    trades.append({"action": "BUY", "ticker": t, "name": q["name"], "from": 0.0, "to": r(w, 4), "dollars": r(w * portfolio_value, 0),
+                                   "reason": f"Replacement for {exits[0]['ticker']} from the queue (thesis score {q['thesis_score']}, probability {prob:.0%}) · stop {stops['active_stop']}"})
+                    n_repl += 1; note = f"{exits[0]['ticker']} replaced by {t} from the queue"
+                    queue = [z for z in queue if z["ticker"] != t]
+                    break
+                else:
+                    note = "No queued name fits the sector cap at a 2% minimum: cash until the recalibration"
+            recent_exits = recent_exits + [today.isoformat()]
         eq = sum(h["weight"] for h in held)
-        return {**prior, **header, "holdings": held, "trades": [{"action": "SELL", "ticker": e["ticker"], "name": e["name"], "from": e["prior_weight"], "to": 0.0,
-                                                                 "dollars": r(-e["prior_weight"] * portfolio_value, 0), "reason": e["reason"]} for e in exits],
+        return {**prior, **header, "holdings": held, "trades": trades, "funnel": funnel_m, "candidates": cand_m[:80], "queue": queue, "cooldowns": cooldowns,
+                "recent_exit_dates": recent_exits, "replacements_month": month_key, "replacements_this_month": n_repl, "replacement_note": note,
                 "exits": exits, "alerts": alerts, "equity_weight": r(eq, 4), "cash_weight": r(1 - eq, 4), "is_initial": False,
                 "stats": {**(prior.get("stats") or {}), "positions": len(held), "weighted_thesis_score": r(wmean([(h.get("thesis_score"), h["weight"]) for h in held]), 0),
                           "weighted_probability": r(wmean([(h.get("thesis_probability"), h["weight"]) for h in held]), 2)},
@@ -253,7 +370,7 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], companies: d
         entry = float(h.get("entry_price") or p)
         trail_high = max(float(h.get("trail_high") or entry), p)
         gain = (p / entry - 1) * 100
-        stops = _stop_levels(entry, ta.get("atr20"), p, trail_high, gain)
+        stops = _stop_levels(entry, ta.get("atr20"), p, trail_high, gain, h.get("stops"))
         v = val(t)
         fails = (int(h.get("tech_fail_runs") or 0) + 1) if ta and (ta.get("score") or 100) < 50 else 0
         why = []
@@ -275,45 +392,7 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], companies: d
             keep[t] = {"entry": entry, "trail_high": trail_high, "stops": stops, "fails": fails, "entered": h.get("entered")}
 
     # --- 2. thesis favour first, then the bull ceiling, then market / sector / trend gates
-    funnel = {"universe": len(ts), "favoured": 0, "headwind": 0, "above_bull": 0, "market_gate": 0, "sector_gate": 0, "trend_gate": 0, "earnings": 0, "caps": 0, "selected": 0}
-    cand_rows, passed = [], []
-    exited = {e["ticker"] for e in exits}
-    for t, x in sorted(ts.items(), key=lambda kv: -(kv[1]["thesis_score"] or 0)):
-        if x["headwind"] and (x["thesis_score"] or 0) >= RULES["min_thesis_score"]:
-            funnel["headwind"] += 1
-        if not x["favoured"] and t not in keep:
-            continue
-        p, c = px(t), companies[t]
-        if not p or t in exited:
-            continue
-        funnel["favoured"] += 1
-        v, tk, ta = val(t), tech(t), technicals.get(t) or {}
-        row = {"ticker": t, "name": c["name"], "sector": c["sector"], **{k: x[k] for k in ("thesis_score", "thesis_probability", "components", "drivers", "theses", "top_theme")},
-               "valuation": v, "technical": tk, "incumbent": t in keep}
-        status, reason = "passed", None
-        if t not in keep:
-            if v["above_bull"]:
-                status, reason = "above_bull", f"Price {v['price']} above the bull scenario {v['bull']}"
-            elif not gate_open:
-                status, reason = "market_gate", "Market gate closed: index below its 10-month average and behind T-bills"
-            elif rot.get(c["sector"]) is not None and rot[c["sector"]] < RULES["rotation_entry_min"]:
-                status, reason = "sector_gate", f"Capital leaving {c['sector']} (rotation {rot[c['sector']]:+.0f})"
-            elif ta and (not ta.get("ready") or (ta.get("score") or 0) < RULES["technical_min_score"]):
-                status, reason = "trend_gate", f"Trend gate: {ta.get('stage')} ({ta.get('passes')}/8 criteria)"
-            else:
-                filed = (analyses[t].get("latest") or {}).get("filed")
-                try:
-                    days = 91 - (today - date.fromisoformat(str(filed)[:10])).days if filed else None
-                except ValueError:
-                    days = None
-                if days is not None and 0 <= days <= RULES["earnings_blackout_days"]:
-                    status, reason = "earnings", f"Earnings expected in ~{days} days; entry deferred"
-        if status != "passed":
-            funnel[status] += 1
-        row["status"], row["reason"] = status, reason
-        cand_rows.append(row)
-        if status == "passed":
-            passed.append(row)
+    funnel, cand_rows, passed = _gate_rows(ts, keep, {e["ticker"] for e in exits}, companies, analyses, technicals, px, val, tech, rot, gate_open, today)
 
     # --- 3. sizing by thesis probability under risk and concentration caps
     equity_cap = (risk.get("posture", {}).get("recommended", {}).get("Equities") or 65) / 100 * (1.0 if gate_open else 0.5)
@@ -384,6 +463,10 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], companies: d
         holdings.append({k: v for k, v in c.items() if k not in ("incumbent", "reason")} | {
             "weight": r(c["weight"], 4), "dollars": r(c["weight"] * portfolio_value, 0), "shares": r(c["weight"] * portfolio_value / p, 1),
             "price": r(p, 2), "entry_price": r(c["entry_price"], 2), "pnl_pct": r((p / c["entry_price"] - 1) * 100, 1), "prior_weight": prev["weight"] if prev else None})
+    cooldowns_out = {k: v for k, v in ((prior or {}).get("cooldowns") or {}).items() if date.fromisoformat(v) > today}
+    for e in exits:
+        if "stop" in (e.get("reason") or "").lower() or "Stage-4" in (e.get("reason") or ""):
+            cooldowns_out[e["ticker"]] = (today + timedelta(days=RULES["stopout_cooldown_days"])).isoformat()
     trades = [{"action": "SELL", "ticker": e["ticker"], "name": e.get("name"), "from": e["prior_weight"], "to": 0.0, "reason": e["reason"]} for e in exits]
     for h in holdings:
         if h["status"] == "new":
@@ -414,6 +497,8 @@ def compute(strategies: dict[str, dict], analyses: dict[str, dict], companies: d
         "cadence": {"mode": "recalibrate", "last_recalibration": today.isoformat(), "next_recalibration": _next_month(today)},
         "equity_weight": r(eq, 4), "equity_cap": r(equity_cap, 4), "cash_weight": r(1 - eq, 4),
         "holdings": holdings, "trades": trades, "exits": exits, "alerts": [], "funnel": funnel,
+        "queue": _queue(passed, {h["ticker"] for h in holdings}, (prior or {}).get("queue"), cooldowns_out, today), "cooldowns": cooldowns_out,
+        "recent_exit_dates": [], "replacements_month": today.strftime("%Y-%m"), "replacements_this_month": 0, "replacement_note": None,
         "candidates": cand_rows[:80],
         "theses": [{"id": k, "title": titles[k].get("title"), "posterior": titles[k].get("probability", {}).get("posterior"), "horizon": titles[k].get("horizon"),
                     "weight": r(thesis_w.get(k, 0), 4), "held": sorted(h["ticker"] for h in holdings if k in (h.get("theses") or []))}

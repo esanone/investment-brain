@@ -6,6 +6,7 @@ import { date, money, num, pct, price, pts, ptsSigned, signed, signClass, yesNo,
 import { EmptyState } from "@/components/EmptyState";
 import { HoldingsTable, RulesTable } from "@/components/HoldingsTable";
 import { Meter } from "@/components/Meter";
+import { NextInLine } from "@/components/NextInLine";
 import { PageHeader } from "@/components/PageHeader";
 import { ScoreBadge } from "@/components/ScoreBadge";
 import { Section } from "@/components/Section";
@@ -381,6 +382,16 @@ export default async function PortfolioPage() {
         >
           <HoldingsTable rows={p.holdings ?? []} />
         </Section>
+
+        <NextInLine
+          book="valuation"
+          queue={p.queue}
+          rules={p.rules}
+          cooldowns={p.cooldowns}
+          replacementNote={p.replacement_note}
+          replacementsThisMonth={p.replacements_this_month}
+          className="lg:col-span-2"
+        />
 
         <Section
           title="Pending at next recalibration"

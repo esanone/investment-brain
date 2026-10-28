@@ -84,7 +84,7 @@ function ComponentsCell({ c }: { c: ThesisBookComponents | null | undefined }) {
   );
 }
 
-function ValuationChip({ v }: { v: ThesisBookValuation | null | undefined }) {
+export function ValuationChip({ v }: { v: ThesisBookValuation | null | undefined }) {
   if (!v?.position) return <span className="chip">—</span>;
   return (
     <span className={`chip whitespace-nowrap ${POSITION_CLASS[v.position] ?? ""}`} title={POSITION_TITLES[v.position]}>
@@ -94,16 +94,18 @@ function ValuationChip({ v }: { v: ThesisBookValuation | null | undefined }) {
 }
 
 /** Signed distance from the price up to the bull scenario; negative means the price is already above it. */
-function ToBull({ v }: { v: ThesisBookValuation | null | undefined }) {
+export function ToBull({ v }: { v: ThesisBookValuation | null | undefined }) {
   if (!has(v?.pct_to_bull)) return <span className="text-subtle">—</span>;
   return <span className={v.pct_to_bull < 0 ? "text-neg" : ""}>{ptsSigned(v.pct_to_bull, 1)}</span>;
 }
 
-function TrendCell({ t }: { t: ThesisBookTechnical | null | undefined }) {
+/** Criteria passed of 8. Accepts the compact queue read too (no RSI / ready flag). */
+export function TrendCell({ t }: { t: Partial<ThesisBookTechnical> | null | undefined }) {
   if (!t || !has(t.passes)) return <span className="text-subtle">—</span>;
   const stage = t.stage ? t.stage.replace(/_/g, " ") : "stage not classified";
+  const extra = `${has(t.rsi14) ? ` · RSI ${num(t.rsi14, 0)}` : ""}${t.ready === true ? " · ready" : t.ready === false ? " · not ready" : ""}`;
   return (
-    <span title={`${stage} · trend score ${num(t.score, 0)} · RSI ${num(t.rsi14, 0)}${t.ready ? " · ready" : " · not ready"}`}>
+    <span title={`${stage} · trend score ${num(t.score, 0)}${extra}`}>
       <span className="font-medium">{num(t.passes, 0)}</span>
       <span className="text-subtle">/8</span>
       {t.ready && <span className="ml-1 text-pos">✓</span>}
@@ -111,7 +113,7 @@ function TrendCell({ t }: { t: ThesisBookTechnical | null | undefined }) {
   );
 }
 
-function ThesisIds({ ids }: { ids: string[] | null | undefined }) {
+export function ThesisIds({ ids }: { ids: string[] | null | undefined }) {
   if (!ids?.length) return <span className="text-subtle">—</span>;
   return (
     <span className="flex gap-1">
@@ -122,7 +124,7 @@ function ThesisIds({ ids }: { ids: string[] | null | undefined }) {
   );
 }
 
-function TickerCell({ ticker, name }: { ticker: string; name: string | null | undefined }) {
+export function TickerCell({ ticker, name }: { ticker: string; name: string | null | undefined }) {
   return (
     <>
       <Link href={companyHref(ticker)} className="font-medium">
